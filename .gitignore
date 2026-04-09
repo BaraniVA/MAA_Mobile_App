@@ -1,0 +1,50 @@
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# React Native / Native builds
+ios/build/
+ios/Pods/
+ios/DerivedData/
+ios/Index/
+android/.gradle
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+*.aab
+*.ipa
+
+# Secrets & Environment variables
+.env
+.env.local
+.env.*.local
+*.pem
+*.keystore
+*.jks
+
+# Logs
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Typescript
+*.tsbuildinfo
+
+# Python API Backend (from previous iteration)
+__pycache__/
+.pytest_cache/
+.venv/
+env/
+api/.cache/

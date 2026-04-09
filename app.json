@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Maa",
+    "slug": "maa",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "maa",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-router",
+      "expo-sqlite"
+    ],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.local.maa"
+    },
+    "ios": {
+      "bundleIdentifier": "com.local.maa"
+    }
+  }
+}
