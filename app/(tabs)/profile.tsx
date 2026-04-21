@@ -1,220 +1,175 @@
-import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
-import * as FileSystem from "expo-file-system/legacy";
-import { useFocusEffect } from "@react-navigation/native";
-import { Card } from "@/components/Card";
-import { InlineToast } from "@/components/InlineToast";
-import { colors, inkBorder, radius, spacing } from "@/constants/theme";
-import { useApp } from "@/context/AppContext";
-import { getStats } from "@/db/helpers";
-import { formatDateTimeLocal, pregnancyWeek } from "@/services/date";
+import { useMemo, useState } from "react";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useRouter } from "expo-router";
+import { AlertTriangle, Heart, Settings, UserRound, Volume2 } from "lucide-react-native";
+import { LanguageSelector } from "@/components/LanguageSelector";
 
-const repeats: Array<"none" | "daily" | "weekly"> = ["none", "daily", "weekly"];
+import { colors, fonts } from "@/constants/theme";
+import { useApp } from "@/context/AppContext";
+import { healthFeedItems } from "@/data/healthFeed";
+import { pregnancyWeek } from "@/services/date";
+
+const milestones = [
+  { title: "First Ultrasound", week: "WEEK 12" },
+  { title: "Anatomy Scan", week: "WEEK 20" },
+  { title: "Glucose Test", week: "WEEK 24" },
+  { title: "Third Trimester", week: "WEEK 28" },
+] as const;
 
 export default function ProfileScreen() {
-  const { db, profile, upsertProfile, reminders, upsertReminder, removeReminder } = useApp();
+  const router = useRouter();
+  const { profile, feedActivity } = useApp();
+  const [activityTab, setActivityTab] = useState<"liked" | "saved">("liked");
 
-  const [name, setName] = useState("");
-  const [dueDate, setDueDate] = useState(new Date());
-  const [bloodType, setBloodType] = useState("");
-  const [doctorName, setDoctorName] = useState("");
-  const [doctorPhone, setDoctorPhone] = useState("");
-  const [voices, setVoices] = useState<string[]>([]);
-  const [preferredVoice, setPreferredVoice] = useState("default");
-  const [showPicker, setShowPicker] = useState(false);
-  const [toast, setToast] = useState("");
-  const [stats, setStats] = useState({ entriesCount: 0, daysTracked: 0, currentStreak: 0 });
+  const week = profile?.due_date ? pregnancyWeek(profile.due_date) : 24;
+  const displayName = profile?.name?.trim() ? profile.name : "Mama Bear";
 
-  const [title, setTitle] = useState("");
-  const [reminderDate, setReminderDate] = useState("");
-  const [reminderTime, setReminderTime] = useState("");
-  const [repeat, setRepeat] = useState<"none" | "daily" | "weekly">("none");
-  const [editId, setEditId] = useState<number | undefined>(undefined);
+  const progress = useMemo(() => {
+    const pct = Math.max(0, Math.min(100, Math.round((week / 40) * 100)));
+    return pct;
+  }, [week]);
 
-  const loadVoices = async () => {
-    try {
-      const root = `${FileSystem.bundleDirectory}assets/voices`;
-      const files = await FileSystem.readDirectoryAsync(root);
-      const onnx = files.filter((f) => f.endsWith(".onnx"));
-      setVoices(onnx.length ? onnx : ["default"]);
-    } catch {
-      setVoices(["default"]);
-    }
-  };
+  const likedItems = useMemo(() => {
+    const likedSet = new Set(feedActivity.filter((item) => item.liked === 1).map((item) => item.slug));
+    return healthFeedItems.filter((item) => likedSet.has(item.slug));
+  }, [feedActivity]);
 
-  const refreshStats = useCallback(async () => {
-    const result = await getStats(db);
-    setStats(result);
-  }, [db]);
+  const savedItems = useMemo(() => {
+    const savedSet = new Set(feedActivity.filter((item) => item.saved === 1).map((item) => item.slug));
+    return healthFeedItems.filter((item) => savedSet.has(item.slug));
+  }, [feedActivity]);
 
-  useEffect(() => {
-    if (!profile) return;
-    setName(profile.name || "");
-    setDueDate(new Date(profile.due_date));
-    setBloodType(profile.blood_type || "");
-    setDoctorName(profile.doctor_name || "");
-    setDoctorPhone(profile.doctor_phone || "");
-    setPreferredVoice(profile.preferred_voice || "default");
-  }, [profile]);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadVoices().catch(() => undefined);
-      refreshStats().catch(() => undefined);
-    }, [refreshStats])
-  );
-
-  const saveProfileForm = async () => {
-    try {
-      await upsertProfile({
-        name: name.trim(),
-        dueDate: dueDate.toISOString().slice(0, 10),
-        bloodType,
-        doctorName,
-        doctorPhone,
-        preferredVoice
-      });
-      setToast("Profile saved.");
-    } catch {
-      setToast("Failed to save profile.");
-    }
-  };
-
-  const saveReminderForm = async () => {
-    if (!title || !reminderDate || !reminderTime) {
-      setToast("Please fill title, date and time for reminder.");
-      return;
-    }
-
-    try {
-      await upsertReminder({
-        id: editId,
-        title,
-        remindAt: formatDateTimeLocal(reminderDate, reminderTime),
-        repeat
-      });
-      setTitle("");
-      setReminderDate("");
-      setReminderTime("");
-      setRepeat("none");
-      setEditId(undefined);
-      setToast("Reminder saved.");
-    } catch {
-      setToast("Unable to save reminder.");
-    }
-  };
-
-  const week = pregnancyWeek(dueDate.toISOString().slice(0, 10));
+  const visibleActivity = activityTab === "liked" ? likedItems : savedItems;
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      {toast ? <InlineToast message={toast} /> : null}
-
-      <Text style={styles.title}>Profile</Text>
-      <Card>
-        <Text style={styles.label}>Name</Text>
-        <TextInput value={name} onChangeText={setName} style={styles.input} placeholder="Your name" placeholderTextColor="#7A7A7A" />
-
-        <Text style={styles.label}>Due date</Text>
-        <TouchableOpacity onPress={() => setShowPicker(true)} style={styles.inputButton}>
-          <Text style={styles.inputText}>{dueDate.toISOString().slice(0, 10)}</Text>
-        </TouchableOpacity>
-        {showPicker ? (
-          <DateTimePicker
-            value={dueDate}
-            mode="date"
-            display={Platform.OS === "ios" ? "spinner" : "default"}
-            onChange={(_, selected) => {
-              setShowPicker(Platform.OS === "ios");
-              if (selected) setDueDate(selected);
-            }}
-          />
-        ) : null}
-
-        <Text style={styles.weekText}>Pregnancy week: {week}</Text>
-
-        <Text style={styles.label}>Blood type</Text>
-        <TextInput value={bloodType} onChangeText={setBloodType} style={styles.input} placeholder="e.g. O+" placeholderTextColor="#7A7A7A" />
-
-        <Text style={styles.label}>Doctor name</Text>
-        <TextInput value={doctorName} onChangeText={setDoctorName} style={styles.input} placeholder="Doctor name" placeholderTextColor="#7A7A7A" />
-
-        <Text style={styles.label}>Doctor phone</Text>
-        <TextInput value={doctorPhone} onChangeText={setDoctorPhone} style={styles.input} placeholder="Phone" placeholderTextColor="#7A7A7A" keyboardType="phone-pad" />
-
-        <Text style={styles.label}>Preferred voice</Text>
-        <View style={styles.voiceList}>
-          {voices.length === 0 ? <ActivityIndicator color={colors.charcoal} /> : null}
-          {voices.map((voice) => (
-            <TouchableOpacity
-              key={voice}
-              onPress={() => setPreferredVoice(voice)}
-              style={[styles.voiceItem, preferredVoice === voice && styles.voiceItemActive]}
-            >
-              <Text style={styles.voiceText}>{voice}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <TouchableOpacity onPress={saveProfileForm} style={styles.saveBtn}>
-          <Text style={styles.saveText}>Save Profile</Text>
-        </TouchableOpacity>
-      </Card>
-
-      <Text style={styles.sectionTitle}>Reminders</Text>
-      <Card>
-        <TextInput value={title} onChangeText={setTitle} style={styles.input} placeholder="Reminder title" placeholderTextColor="#7A7A7A" />
-        <View style={styles.row}>
-          <TextInput value={reminderDate} onChangeText={setReminderDate} style={[styles.input, { flex: 1 }]} placeholder="YYYY-MM-DD" placeholderTextColor="#7A7A7A" />
-          <TextInput value={reminderTime} onChangeText={setReminderTime} style={[styles.input, { flex: 1 }]} placeholder="HH:MM" placeholderTextColor="#7A7A7A" />
-        </View>
-
-        <View style={styles.rowWrap}>
-          {repeats.map((item) => (
-            <TouchableOpacity key={item} onPress={() => setRepeat(item)} style={[styles.repeatBtn, repeat === item && styles.repeatActive]}>
-              <Text style={styles.repeatText}>{item}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <TouchableOpacity onPress={saveReminderForm} style={styles.saveBtn}>
-          <Text style={styles.saveText}>{editId ? "Update Reminder" : "Add Reminder"}</Text>
-        </TouchableOpacity>
-      </Card>
-
-      {reminders.map((reminder) => (
-        <Card key={reminder.id}>
-          <Text style={styles.remTitle}>{reminder.title}</Text>
-          <Text style={styles.remMeta}>{reminder.remind_at}</Text>
-          <Text style={styles.remMeta}>Repeat: {reminder.repeat}</Text>
-          <View style={styles.row}>
-            <TouchableOpacity
-              style={styles.smallBtn}
-              onPress={() => {
-                setEditId(reminder.id);
-                setTitle(reminder.title);
-                const [date, time] = reminder.remind_at.split("T");
-                setReminderDate(date);
-                setReminderTime(time.slice(0, 5));
-                setRepeat(reminder.repeat);
-              }}
-            >
-              <Text style={styles.smallBtnText}>Edit</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.smallBtn, { backgroundColor: colors.blush }]} onPress={() => removeReminder(reminder.id)}>
-              <Text style={styles.smallBtnText}>Delete</Text>
-            </TouchableOpacity>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <View style={styles.headerWrap}>
+        <View style={styles.headerLeft}>
+          <View style={styles.logoCircle}>
+            <Heart size={16} color={colors.white} fill={colors.white} />
           </View>
-        </Card>
-      ))}
+          <View>
+            <Text style={styles.logoText}>Maternal</Text>
+            <View style={styles.aiRow}>
+              <View style={styles.aiDot} />
+              <Text style={styles.aiText}>AI ASSISTANT</Text>
+            </View>
+          </View>
+        </View>
 
-      <Text style={styles.sectionTitle}>Data</Text>
-      <View style={styles.row}>
-        <Card style={styles.metric}><Text style={styles.metricValue}>{stats.entriesCount}</Text><Text style={styles.metricLabel}>Entries</Text></Card>
-        <Card style={styles.metric}><Text style={styles.metricValue}>{stats.daysTracked}</Text><Text style={styles.metricLabel}>Days</Text></Card>
-        <Card style={styles.metric}><Text style={styles.metricValue}>{stats.currentStreak}</Text><Text style={styles.metricLabel}>Streak</Text></Card>
+        <View style={styles.headerRight}>
+          <LanguageSelector />
+          <TouchableOpacity style={styles.emergencyPillBtn} onPress={() => router.push("/emergency") }>
+            <AlertTriangle size={14} color={colors.white} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconPillBtn}>
+            <Volume2 size={16} color={colors.brand} />
+          </TouchableOpacity>
+        </View>
       </View>
+
+      <View style={styles.avatarSection}>
+        <View style={styles.avatarWrap}>
+          <UserRound size={36} color={colors.white} />
+        </View>
+        <TouchableOpacity style={styles.settingsBtn}>
+          <Settings size={14} color="#AAB5CB" />
+        </TouchableOpacity>
+
+        <Text style={styles.nameText}>{displayName}</Text>
+        <Text style={styles.weekText}>{week} WEEKS PREGNANT</Text>
+      </View>
+
+      <View style={styles.journeyHead}>
+        <Text style={styles.sectionTitle}>YOUR JOURNEY</Text>
+        <Text style={styles.completeText}>% COMPLETE</Text>
+      </View>
+
+      <View style={styles.journeyCard}>
+        <View style={styles.progressMetaRow}>
+          <Text style={styles.progressMeta}>WEEK 1</Text>
+          <Text style={styles.progressCount}>0 / 40</Text>
+          <Text style={styles.progressMeta}>WEEK 40</Text>
+        </View>
+
+        <View style={styles.progressBarTrack}>
+          <View style={styles.progressBarBase} />
+          <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
+        </View>
+
+        <View style={styles.progressLabelsRow}>
+          <Text style={styles.progressLabel}>CONCEPTION</Text>
+          <Text style={styles.progressLabel}>TRIMESTER 2</Text>
+          <Text style={styles.progressLabel}>DUEDATE</Text>
+        </View>
+
+        <View style={styles.trimesterRow}>
+          <View style={styles.trimesterIcon}>
+            <Heart size={14} color={colors.brand} />
+          </View>
+          <View style={styles.trimesterTextWrap}>
+            <Text style={styles.trimesterTitle}>Third Trimester</Text>
+            <Text style={styles.trimesterSub}>WEEK 28 - 40</Text>
+          </View>
+          <View style={styles.activeBadge}>
+            <Text style={styles.activeBadgeText}>Active</Text>
+          </View>
+        </View>
+
+        <View style={styles.timelineWrap}>
+          {milestones.map((item, idx) => (
+            <View key={item.title} style={styles.timelineRow}>
+              <View style={styles.timelineLeft}>
+                <View style={styles.timelineDot} />
+                {idx < milestones.length - 1 ? <View style={styles.timelineLine} /> : null}
+              </View>
+              <View>
+                <Text style={styles.timelineTitle}>{item.title}</Text>
+                <Text style={styles.timelineWeek}>{item.week}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.activityHead}>
+        <Text style={styles.sectionTitle}>YOUR ACTIVITY</Text>
+      </View>
+
+      <View style={styles.activityCard}>
+        <View style={styles.activityTabsRow}>
+          <TouchableOpacity
+            style={[styles.activityTabBtn, activityTab === "liked" && styles.activityTabBtnActive]}
+            onPress={() => setActivityTab("liked")}
+          >
+            <Text style={[styles.activityTabText, activityTab === "liked" && styles.activityTabTextActive]}>LIKED</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.activityTabBtn, activityTab === "saved" && styles.activityTabBtnActive]}
+            onPress={() => setActivityTab("saved")}
+          >
+            <Text style={[styles.activityTabText, activityTab === "saved" && styles.activityTabTextActive]}>SAVED</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.activityList}>
+          {visibleActivity.length === 0 ? (
+            <Text style={styles.activityEmptyText}>No {activityTab} feeds yet.</Text>
+          ) : (
+            visibleActivity.map((item) => (
+              <View key={item.slug} style={styles.activityRow}>
+                <View style={styles.activityBullet} />
+                <View style={styles.activityTextWrap}>
+                  <Text style={styles.activityTitle}>{item.title}</Text>
+                  <Text style={styles.activityMeta}>{item.section} • {item.stage}</Text>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+      </View>
+
+      <View style={styles.bottomPad} />
     </ScrollView>
   );
 }
@@ -222,151 +177,412 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.ivory
+    backgroundColor: "#F6F6F8",
   },
   content: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xxxl
+    paddingTop: 18,
+    paddingHorizontal: 16,
+    gap: 14,
   },
-  title: {
-    color: colors.charcoal,
-    fontFamily: "PlayfairDisplay_600SemiBold",
-    fontSize: 30,
-    marginBottom: spacing.md
+  headerWrap: {
+    marginTop: 20,
+    position: "relative",
+    zIndex: 120,
+    elevation: 30,
+    overflow: "visible",
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
   },
-  sectionTitle: {
-    color: colors.charcoal,
-    fontFamily: "PlayfairDisplay_500Medium",
-    fontSize: 24,
-    marginBottom: spacing.sm
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
-  label: {
-    color: colors.charcoal,
-    fontFamily: "Inter_500Medium",
-    textTransform: "uppercase",
+  logoCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.brand,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    elevation: 6,
+  },
+  logoText: {
+    fontFamily: fonts.serif,
+    fontSize: 16,
+    color: "#252A39",
+  },
+  aiRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 1,
+  },
+  aiDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "#25C45E",
+  },
+  aiText: {
+    color: "#8B93AE",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    position: "relative",
+    zIndex: 140,
+  },
+  pillBtn: {
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#F5F6FA",
+    borderWidth: 1,
+    borderColor: "#ECECF1",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  pillBtnText: {
+    color: "#596079",
     fontSize: 11,
-    marginBottom: spacing.xs
+    fontWeight: "700",
   },
-  input: {
+  iconPillBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#FFF1F5",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#FDE2EA",
+  },
+  emergencyPillBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#D6285A",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#D6285A",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  avatarSection: {
+    alignItems: "center",
+    marginTop: 12,
+    position: "relative",
+  },
+  avatarWrap: {
+    width: 96,
+    height: 96,
+    borderRadius: 32,
+    backgroundColor: colors.brand,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 7,
+  },
+  settingsBtn: {
+    position: "absolute",
+    top: 62,
+    right: 118,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: colors.white,
-    ...inkBorder,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    color: colors.charcoal,
-    fontFamily: "Inter_400Regular",
-    marginBottom: spacing.md
+    borderWidth: 1,
+    borderColor: "#EAEFF8",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  inputButton: {
-    backgroundColor: colors.white,
-    ...inkBorder,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    marginBottom: spacing.sm
-  },
-  inputText: {
-    color: colors.charcoal,
-    fontFamily: "Inter_400Regular"
+  nameText: {
+    marginTop: 14,
+    fontFamily: fonts.serif,
+    fontSize: 34 / 2,
+    fontStyle: "italic",
+    color: "#1D2E52",
   },
   weekText: {
-    color: colors.charcoal,
-    fontFamily: "Inter_500Medium",
-    marginBottom: spacing.md
+    marginTop: 8,
+    color: "#8EA0C2",
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 1.1,
   },
-  voiceList: {
-    gap: spacing.sm,
-    marginBottom: spacing.md
-  },
-  voiceItem: {
-    backgroundColor: colors.white,
-    ...inkBorder,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm
-  },
-  voiceItemActive: {
-    backgroundColor: colors.sage
-  },
-  voiceText: {
-    color: colors.charcoal,
-    fontFamily: "Inter_400Regular",
-    fontSize: 12
-  },
-  saveBtn: {
-    backgroundColor: colors.rose,
-    ...inkBorder,
-    borderRadius: radius.sm,
+  journeyHead: {
+    marginTop: 22,
+    flexDirection: "row",
     alignItems: "center",
-    paddingVertical: spacing.md
+    justifyContent: "space-between",
   },
-  saveText: {
-    color: colors.charcoal,
-    fontFamily: "Inter_600SemiBold"
+  sectionTitle: {
+    color: "#8EA0C2",
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 2,
   },
-  row: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    alignItems: "center"
-  },
-  rowWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    marginBottom: spacing.md
-  },
-  repeatBtn: {
-    ...inkBorder,
-    borderRadius: radius.pill,
-    backgroundColor: colors.white,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs
-  },
-  repeatActive: {
-    backgroundColor: colors.sage
-  },
-  repeatText: {
-    color: colors.charcoal,
-    fontFamily: "Inter_500Medium",
-    fontSize: 12
-  },
-  remTitle: {
-    color: colors.charcoal,
-    fontFamily: "Inter_600SemiBold",
-    marginBottom: spacing.xs
-  },
-  remMeta: {
-    color: colors.charcoal,
-    fontFamily: "Inter_400Regular",
+  completeText: {
+    color: colors.brand,
     fontSize: 12,
-    marginBottom: spacing.xs
+    fontWeight: "900",
+    letterSpacing: 1,
   },
-  smallBtn: {
-    backgroundColor: colors.sage,
-    ...inkBorder,
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    marginTop: spacing.xs
+  journeyCard: {
+    marginTop: 8,
+    backgroundColor: colors.white,
+    borderRadius: 30,
+    borderWidth: 1,
+    borderColor: "#ECEFF6",
+    overflow: "hidden",
+    shadowColor: "#1B2A52",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    elevation: 3,
   },
-  smallBtnText: {
-    color: colors.charcoal,
-    fontFamily: "Inter_500Medium",
-    fontSize: 12
+  progressMetaRow: {
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  metric: {
+  progressMeta: {
+    color: "#8193B3",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  progressCount: {
+    color: "#657BA4",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  progressBarTrack: {
+    paddingHorizontal: 20,
+    marginBottom: 8,
+  },
+  progressBarBase: {
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#EFF3F9",
+  },
+  progressBarFill: {
+    position: "absolute",
+    left: 20,
+    top: 0,
+    bottom: 0,
+    borderRadius: 7,
+    backgroundColor: "#DDE4F1",
+    height: 14,
+  },
+  progressLabelsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F8",
+  },
+  progressLabel: {
+    color: "#C0CADE",
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  trimesterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F8",
+  },
+  trimesterIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: "#E8EDF6",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  trimesterTextWrap: {
     flex: 1,
-    alignItems: "center"
   },
-  metricValue: {
-    color: colors.charcoal,
-    fontFamily: "PlayfairDisplay_600SemiBold",
-    fontSize: 26
+  trimesterTitle: {
+    color: "#1F2B4D",
+    fontSize: 28 / 2,
+    fontWeight: "800",
+    marginBottom: 3,
   },
-  metricLabel: {
-    color: colors.charcoal,
-    fontFamily: "Inter_500Medium",
+  trimesterSub: {
+    color: "#8EA0C2",
     fontSize: 11,
-    textTransform: "uppercase"
-  }
+    fontWeight: "800",
+  },
+  activeBadge: {
+    backgroundColor: "#FFE7ED",
+    borderRadius: 13,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  activeBadgeText: {
+    color: colors.brand,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  timelineWrap: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 14,
+  },
+  timelineRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    minHeight: 56,
+  },
+  timelineLeft: {
+    width: 28,
+    alignItems: "center",
+    marginRight: 10,
+  },
+  timelineDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#D8DEEB",
+    marginTop: 4,
+    zIndex: 2,
+  },
+  timelineLine: {
+    width: 2,
+    flex: 1,
+    backgroundColor: "#E7ECF5",
+    marginTop: 2,
+  },
+  timelineTitle: {
+    color: "#8598BA",
+    fontSize: 15 / 1.02,
+    fontWeight: "700",
+    marginBottom: 2,
+  },
+  timelineWeek: {
+    color: "#A3B1CC",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  activityHead: {
+    marginTop: 12,
+  },
+  activityCard: {
+    backgroundColor: colors.white,
+    borderRadius: 30,
+    borderWidth: 1,
+    borderColor: "#ECEFF6",
+    padding: 14,
+    shadowColor: "#1B2A52",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  activityTabsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+  activityTabBtn: {
+    flex: 1,
+    height: 38,
+    borderRadius: 14,
+    backgroundColor: "#F7F9FF",
+    borderWidth: 1,
+    borderColor: "#E8EDF8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  activityTabBtnActive: {
+    backgroundColor: colors.brand,
+    borderColor: colors.brand,
+  },
+  activityTabText: {
+    color: "#8EA0C2",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+  },
+  activityTabTextActive: {
+    color: colors.white,
+  },
+  activityList: {
+    gap: 10,
+  },
+  activityRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    paddingHorizontal: 4,
+  },
+  activityBullet: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.brand,
+    marginTop: 6,
+  },
+  activityTextWrap: {
+    flex: 1,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F8",
+    paddingBottom: 10,
+  },
+  activityTitle: {
+    color: "#1F2B4D",
+    fontSize: 13,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  activityMeta: {
+    color: "#8EA0C2",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  activityEmptyText: {
+    color: "#9CA9C4",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+    paddingVertical: 16,
+  },
+  bottomPad: {
+    height: 18,
+  },
 });

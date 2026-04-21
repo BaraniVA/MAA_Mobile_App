@@ -1,13 +1,16 @@
 import { PropsWithChildren, createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { SQLiteDatabase, useSQLiteContext } from "expo-sqlite";
 import * as Notifications from "expo-notifications";
-import { deleteReminder, getProfile, getReminders, saveProfile, saveReminder } from "@/db/helpers";
-import { Profile, Reminder } from "@/types";
+import { deleteReminder, getFeedActivity, getProfile, getReminders, saveProfile, saveReminder, setFeedLike, setFeedSave } from "@/db/helpers";
+import { FeedActivity, Profile, Reminder } from "@/types";
+
+export const supportedLanguages = ["English", "தமிழ்", "हिन्दी", "తెలుగు", "मराठी", "മലയാളം"] as const;
 
 type AppState = {
   db: SQLiteDatabase;
   profile: Profile | null;
   reminders: Reminder[];
+  feedActivity: FeedActivity[];
   loadingProfile: boolean;
   refreshProfile: () => Promise<void>;
   upsertProfile: (payload: {
@@ -19,8 +22,13 @@ type AppState = {
     preferredVoice?: string;
   }) => Promise<void>;
   refreshReminders: () => Promise<void>;
+  refreshFeedActivity: () => Promise<void>;
   upsertReminder: (payload: { id?: number; title: string; remindAt: string; repeat: "none" | "daily" | "weekly" }) => Promise<void>;
   removeReminder: (id: number) => Promise<void>;
+  toggleFeedLike: (slug: string) => Promise<void>;
+  toggleFeedSave: (slug: string) => Promise<void>;
+  selectedLanguage: (typeof supportedLanguages)[number];
+  setSelectedLanguage: (language: (typeof supportedLanguages)[number]) => void;
 };
 
 const AppContext = createContext<AppState | null>(null);
@@ -29,7 +37,9 @@ export function AppProvider({ children }: PropsWithChildren) {
   const db = useSQLiteContext();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [feedActivity, setFeedActivity] = useState<FeedActivity[]>([]);
   const [loadingProfile, setLoadingProfile] = useState(true);
+  const [selectedLanguage, setSelectedLanguage] = useState<(typeof supportedLanguages)[number]>("English");
 
   useEffect(() => {
     Notifications.requestPermissionsAsync().catch(() => undefined);
@@ -45,10 +55,15 @@ export function AppProvider({ children }: PropsWithChildren) {
     setReminders(next);
   }, [db]);
 
+  const refreshFeedActivity = useCallback(async () => {
+    const next = await getFeedActivity(db);
+    setFeedActivity(next);
+  }, [db]);
+
   useEffect(() => {
     const load = async () => {
       setLoadingProfile(true);
-      await Promise.all([refreshProfile(), refreshReminders()]);
+      await Promise.all([refreshProfile(), refreshReminders(), refreshFeedActivity()]);
       setLoadingProfile(false);
     };
 
@@ -103,19 +118,37 @@ export function AppProvider({ children }: PropsWithChildren) {
     await refreshReminders();
   };
 
+  const toggleFeedLike = async (slug: string) => {
+    const current = feedActivity.find((item) => item.slug === slug)?.liked === 1;
+    await setFeedLike(db, slug, !current);
+    await refreshFeedActivity();
+  };
+
+  const toggleFeedSave = async (slug: string) => {
+    const current = feedActivity.find((item) => item.slug === slug)?.saved === 1;
+    await setFeedSave(db, slug, !current);
+    await refreshFeedActivity();
+  };
+
   const value = useMemo(
     () => ({
       db,
       profile,
       reminders,
+      feedActivity,
       loadingProfile,
       refreshProfile,
       upsertProfile,
       refreshReminders,
+      refreshFeedActivity,
       upsertReminder,
-      removeReminder
+      removeReminder,
+      toggleFeedLike,
+      toggleFeedSave,
+      selectedLanguage,
+      setSelectedLanguage,
     }),
-    [db, profile, reminders, loadingProfile, refreshProfile, refreshReminders]
+    [db, profile, reminders, feedActivity, loadingProfile, refreshProfile, refreshReminders, refreshFeedActivity, selectedLanguage]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

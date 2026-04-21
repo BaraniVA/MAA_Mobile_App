@@ -1,26 +1,31 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
+import re
 import subprocess
 import tempfile
 from datetime import date
 from pathlib import Path
 from typing import Literal
 
-import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from google import genai
+from google.genai import types as genai_types
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 APP_DIR = Path(__file__).resolve().parent
 CACHE_FILE = APP_DIR / ".cache" / "affirmations.json"
 VOICE_DIR = APP_DIR.parent / "assets" / "voices"
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:27b")
+load_dotenv(APP_DIR / ".env")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-app = FastAPI(title="Maa Local API", version="1.0.0")
+app = FastAPI(title="Maa Local API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,11 +43,19 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(default_factory=list)
+    language: str = "English"
+    web_search: bool = True
 
 
 class TtsRequest(BaseModel):
     text: str
     voice: str = "default"
+
+
+class SttRequest(BaseModel):
+    audio_base64: str
+    mime_type: str = "audio/m4a"
+    language: str = "English"
 
 
 def _read_affirmation_cache() -> dict[str, str]:
@@ -74,67 +87,188 @@ def _resolve_voice_file(voice: str) -> Path:
     return requested
 
 
+def _get_client() -> genai.Client:
+    if not GEMINI_API_KEY.strip():
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set")
+    return genai.Client(api_key=GEMINI_API_KEY)
+
+
+def _normalize_messages(messages: list[ChatMessage]) -> str:
+    lines: list[str] = []
+    for message in messages:
+        if message.role == "system":
+            continue
+        lines.append(f"{message.role.upper()}: {message.content.strip()}")
+    return "\n".join(lines)
+
+
+def _system_prompt(language: str) -> str:
+    return (
+        "You are Maa, an empathetic maternal health assistant. "
+        "Provide practical, medically cautious, concise support. "
+        "If the user asks for urgent symptoms, suggest contacting emergency care immediately. "
+        f"Always respond in this language: {language}. "
+        "When web search grounding is available, include current and verifiable information."
+    )
+
+
+def _extract_links(text: str) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    urls = re.findall(r"https?://[^\s)\]]+", text)
+    seen: set[str] = set()
+    media: list[dict[str, str]] = []
+    sources: list[dict[str, str]] = []
+
+    for url in urls:
+        clean_url = url.strip().rstrip(".,")
+        if clean_url in seen:
+            continue
+        seen.add(clean_url)
+
+        lower = clean_url.lower()
+        if any(lower.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"]) or "images" in lower:
+            media.append({"type": "image", "title": "Image source", "url": clean_url})
+        elif "youtube.com" in lower or "youtu.be" in lower or lower.endswith(".mp4"):
+            media.append({"type": "video", "title": "Video source", "url": clean_url})
+        else:
+            sources.append({"title": "Web source", "url": clean_url})
+
+    return sources[:8], media[:6]
+
+
+def _build_config(web_search: bool) -> genai_types.GenerateContentConfig:
+    tools = [genai_types.Tool(google_search=genai_types.GoogleSearch())] if web_search else []
+    return genai_types.GenerateContentConfig(
+        tools=tools,
+        temperature=0.55,
+        top_p=0.9,
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/chat")
-async def chat(payload: ChatRequest) -> dict[str, str]:
+def chat(payload: ChatRequest) -> dict[str, object]:
     if not payload.messages:
         raise HTTPException(status_code=400, detail="messages must not be empty")
 
-    body = {
-        "model": OLLAMA_MODEL,
-        "messages": [message.model_dump() for message in payload.messages],
-        "stream": False,
-    }
+    client = _get_client()
+    transcript = _normalize_messages(payload.messages)
+    prompt = f"{_system_prompt(payload.language)}\n\nConversation:\n{transcript}"
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(f"{OLLAMA_URL}/api/chat", json=body)
-            response.raise_for_status()
-            data = response.json()
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=_build_config(payload.web_search),
+        )
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Ollama request failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"Gemini request failed: {exc}") from exc
 
-    text = data.get("message", {}).get("content", "").strip()
-    return {"text": text or "I am here with you. Could you rephrase that one more time?"}
+    text = (response.text or "").strip()
+    if not text:
+        text = "I am here with you. Could you ask that again in a different way?"
+
+    sources, media = _extract_links(text)
+    return {"text": text, "sources": sources, "media": media}
+
+
+@app.post("/chat/stream")
+def chat_stream(payload: ChatRequest):
+    if not payload.messages:
+        raise HTTPException(status_code=400, detail="messages must not be empty")
+
+    client = _get_client()
+    transcript = _normalize_messages(payload.messages)
+    prompt = f"{_system_prompt(payload.language)}\n\nConversation:\n{transcript}"
+
+    def event_stream():
+        full_text = ""
+        try:
+            for chunk in client.models.generate_content_stream(
+                model=GEMINI_MODEL,
+                contents=prompt,
+                config=_build_config(payload.web_search),
+            ):
+                token = (chunk.text or "")
+                if not token:
+                    continue
+                full_text += token
+                yield f"event: token\ndata: {json.dumps({'text': token}, ensure_ascii=True)}\n\n"
+
+            sources, media = _extract_links(full_text)
+            done_payload = {"text": full_text.strip(), "sources": sources, "media": media}
+            yield f"event: done\ndata: {json.dumps(done_payload, ensure_ascii=True)}\n\n"
+        except Exception as exc:
+            yield f"event: error\ndata: {json.dumps({'message': str(exc)}, ensure_ascii=True)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/stt")
+def stt(payload: SttRequest) -> dict[str, str]:
+    client = _get_client()
+
+    encoded = payload.audio_base64.strip()
+    if "," in encoded and encoded.startswith("data:"):
+        encoded = encoded.split(",", 1)[1]
+
+    try:
+        audio_bytes = base64.b64decode(encoded)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid base64 audio: {exc}") from exc
+
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="audio_base64 must not be empty")
+
+    try:
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                genai_types.Part.from_bytes(data=audio_bytes, mime_type=payload.mime_type),
+                (
+                    "Transcribe this speech accurately. "
+                    f"Return plain text only in {payload.language}. "
+                    "Do not add explanations."
+                ),
+            ],
+            config=genai_types.GenerateContentConfig(temperature=0.0),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Gemini transcription failed: {exc}") from exc
+
+    text = (response.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=502, detail="Empty transcription response")
+
+    return {"text": text}
 
 
 @app.get("/affirmation")
-async def affirmation() -> dict[str, str]:
+def affirmation() -> dict[str, str]:
     today = str(date.today())
     cache = _read_affirmation_cache()
     if today in cache:
         return {"text": cache[today]}
 
+    client = _get_client()
     prompt = (
         "Generate one concise, warm pregnancy affirmation in 1 sentence. "
-        "No medical fear language, no emojis, no markdown."
+        "No fear language, no emojis, no markdown."
     )
 
-    body = {
-        "model": OLLAMA_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You write calm, supportive maternal wellness affirmations.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-        "stream": False,
-    }
-
     try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            response = await client.post(f"{OLLAMA_URL}/api/chat", json=body)
-            response.raise_for_status()
-            data = response.json()
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(temperature=0.7),
+        )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to generate affirmation: {exc}") from exc
 
-    text = data.get("message", {}).get("content", "").strip()
+    text = (response.text or "").strip()
     if not text:
         text = "Your body and your heart are doing meaningful work, one calm breath at a time."
 
@@ -144,7 +278,7 @@ async def affirmation() -> dict[str, str]:
 
 
 @app.post("/tts")
-async def tts(payload: TtsRequest):
+def tts(payload: TtsRequest):
     if not payload.text.strip():
         raise HTTPException(status_code=400, detail="text must not be empty")
 

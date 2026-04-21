@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet } from "react-native";
-import { colors, inkBorder, radius, spacing } from "@/constants/theme";
+import { colors, borders, radius, spacing } from "@/constants/theme";
 
 type Props = {
   message: string;
@@ -21,7 +21,7 @@ export function InlineToast({ message, type = "info" }: Props) {
 
 const styles = StyleSheet.create({
   container: {
-    ...inkBorder,
+    ...borders.default,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,

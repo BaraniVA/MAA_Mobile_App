@@ -36,3 +36,25 @@ export type SessionLog = {
   duration_seconds: number;
   created_at: string;
 };
+
+export type FeedActivity = {
+  slug: string;
+  liked: number;
+  saved: number;
+  updated_at: string;
+};
+
+export type SymptomLog = {
+  id: number;
+  date: string;
+  symptom: string;
+  severity: "MILD" | "MODERATE" | "SEVERE";
+  notes: string | null;
+  created_at: string;
+};
+
+export type KickLog = {
+  date: string;
+  kicks: number;
+  updated_at: string;
+};

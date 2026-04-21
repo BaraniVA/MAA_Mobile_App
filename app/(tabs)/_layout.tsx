@@ -1,70 +1,75 @@
 import { Tabs } from "expo-router";
 import { Text, View, StyleSheet } from "react-native";
-import { colors } from "@/constants/theme";
+import { colors, shadows, fonts } from "@/constants/theme";
+import { Home, MessageSquare, Calendar, Flower2, Activity, User } from "lucide-react-native";
 
-function Icon({ label, active }: { label: string; active: boolean }) {
-  return <Text style={[styles.icon, active && styles.iconActive]}>{label}</Text>;
+function TabIcon({ label, active, Icon }: { label: string; active: boolean; Icon: any }) {
+  return (
+    <View style={styles.tabItem}>
+      <Icon size={24} color={active ? colors.brand : colors.textMuted} fill={active && label === "HOME" ? colors.brand : "transparent"} />
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={[styles.tabLabel, active && styles.tabLabelActive]}>{label}</Text>
+      {active && <View style={styles.activeDot} />}
+    </View>
+  );
 }
 
 export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerStyle: {
-          backgroundColor: colors.white
-        },
-        headerTitleStyle: {
-          color: colors.charcoal,
-          fontFamily: "PlayfairDisplay_500Medium"
-        },
+        headerShown: false,
         tabBarStyle: {
           backgroundColor: colors.white,
-          borderTopWidth: 1.5,
-          borderTopColor: colors.charcoal,
-          elevation: 0,
-          shadowOpacity: 0
+          borderTopWidth: 0.5,
+          borderTopColor: '#F2F2F7',
+          height: 90,
+          paddingBottom: 25,
+          paddingTop: 15,
+          ...shadows.default,
         },
-        tabBarActiveTintColor: colors.rose,
-        tabBarInactiveTintColor: colors.charcoal,
-        tabBarLabelStyle: {
-          fontFamily: "Inter_500Medium",
-          fontSize: 11
-        }
+        tabBarShowLabel: false,
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
-          tabBarIcon: ({ focused }) => <Icon label="🏠" active={focused} />
-        }}
-      />
-      <Tabs.Screen
-        name="entry"
-        options={{
-          title: "Entry",
-          tabBarIcon: ({ focused }) => <Icon label="📓" active={focused} />
+          tabBarIcon: ({ focused }) => <TabIcon label="HOME" Icon={Home} active={focused} />
         }}
       />
       <Tabs.Screen
         name="chat"
         options={{
-          title: "Chat",
-          tabBarIcon: ({ focused }) => <Icon label="✦" active={focused} />
+          tabBarIcon: ({ focused }) => <TabIcon label="CHAT" Icon={MessageSquare} active={focused} />
+        }}
+      />
+      <Tabs.Screen
+        name="entry"
+        options={{
+          tabBarIcon: ({ focused }) => <TabIcon label="PLAN" Icon={Calendar} active={focused} />
         }}
       />
       <Tabs.Screen
         name="yoga"
         options={{
-          title: "Yoga",
-          tabBarIcon: ({ focused }) => <Icon label="🧘" active={focused} />
+          tabBarIcon: ({ focused }) => <TabIcon label="YOGA" Icon={Flower2} active={focused} />
+        }}
+      />
+      <Tabs.Screen
+        name="health"
+        options={{
+          tabBarIcon: ({ focused }) => <TabIcon label="HEALTH" Icon={Activity} active={focused} />
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title: "Profile",
-          tabBarIcon: ({ focused }) => <Icon label="👤" active={focused} />
+          tabBarIcon: ({ focused }) => <TabIcon label="PROFILE" Icon={User} active={focused} />
+        }}
+      />
+      <Tabs.Screen
+        name="feed/[slug]"
+        options={{
+          href: null,
         }}
       />
     </Tabs>
@@ -72,11 +77,29 @@ export default function TabsLayout() {
 }
 
 const styles = StyleSheet.create({
-  icon: {
-    fontSize: 16,
-    color: colors.charcoal
+  tabItem: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    minHeight: 50,
   },
-  iconActive: {
-    color: colors.rose
+  tabLabel: {
+    width: 56,
+    textAlign: 'center',
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.textMuted,
+    letterSpacing: 0.5,
+  },
+  tabLabelActive: {
+    color: colors.brand,
+  },
+  activeDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: colors.brand,
+    marginTop: 2,
   }
 });
+

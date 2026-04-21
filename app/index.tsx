@@ -1,7 +1,8 @@
 import { Redirect } from "expo-router";
-import { ActivityIndicator, View, StyleSheet } from "react-native";
-import { useApp } from "@/context/AppContext";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
+
 import { colors } from "@/constants/theme";
+import { useApp } from "@/context/AppContext";
 
 export default function IndexRoute() {
   const { loadingProfile, profile } = useApp();
@@ -9,7 +10,7 @@ export default function IndexRoute() {
   if (loadingProfile) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={colors.charcoal} />
+        <ActivityIndicator color={colors.rose} />
       </View>
     );
   }
@@ -24,8 +25,8 @@ export default function IndexRoute() {
 const styles = StyleSheet.create({
   centered: {
     flex: 1,
-    backgroundColor: colors.ivory,
     alignItems: "center",
-    justifyContent: "center"
-  }
+    justifyContent: "center",
+    backgroundColor: colors.ivory,
+  },
 });

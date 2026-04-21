@@ -1,5 +1,5 @@
 import { SQLiteDatabase } from "expo-sqlite";
-import { Entry, Profile, Reminder } from "@/types";
+import { Entry, FeedActivity, KickLog, Profile, Reminder, SymptomLog } from "@/types";
 
 export async function getProfile(db: SQLiteDatabase): Promise<Profile | null> {
   return db.getFirstAsync<Profile>("SELECT * FROM profile ORDER BY id DESC LIMIT 1");
@@ -172,4 +172,76 @@ export async function cacheAffirmation(db: SQLiteDatabase, date: string, text: s
     date,
     text
   );
+}
+
+export async function getFeedActivity(db: SQLiteDatabase): Promise<FeedActivity[]> {
+  return db.getAllAsync<FeedActivity>("SELECT * FROM feed_activity ORDER BY updated_at DESC");
+}
+
+export async function setFeedLike(db: SQLiteDatabase, slug: string, liked: boolean) {
+  await db.runAsync(
+    `INSERT INTO feed_activity (slug, liked, saved, updated_at)
+     VALUES (?, ?, COALESCE((SELECT saved FROM feed_activity WHERE slug = ?), 0), CURRENT_TIMESTAMP)
+     ON CONFLICT(slug) DO UPDATE SET
+       liked = excluded.liked,
+       updated_at = CURRENT_TIMESTAMP`,
+    slug,
+    liked ? 1 : 0,
+    slug
+  );
+}
+
+export async function setFeedSave(db: SQLiteDatabase, slug: string, saved: boolean) {
+  await db.runAsync(
+    `INSERT INTO feed_activity (slug, liked, saved, updated_at)
+     VALUES (?, COALESCE((SELECT liked FROM feed_activity WHERE slug = ?), 0), ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(slug) DO UPDATE SET
+       saved = excluded.saved,
+       updated_at = CURRENT_TIMESTAMP`,
+    slug,
+    slug,
+    saved ? 1 : 0
+  );
+}
+
+export async function addSymptomLog(
+  db: SQLiteDatabase,
+  payload: {
+    date: string;
+    symptom: string;
+    severity: "MILD" | "MODERATE" | "SEVERE";
+    notes?: string;
+  }
+) {
+  await db.runAsync(
+    "INSERT INTO symptom_logs (date, symptom, severity, notes) VALUES (?, ?, ?, ?)",
+    payload.date,
+    payload.symptom,
+    payload.severity,
+    payload.notes?.trim() || null
+  );
+}
+
+export async function getSymptomLogsByDate(db: SQLiteDatabase, date: string): Promise<SymptomLog[]> {
+  return db.getAllAsync<SymptomLog>(
+    "SELECT * FROM symptom_logs WHERE date = ? ORDER BY created_at DESC",
+    date
+  );
+}
+
+export async function setKickCount(db: SQLiteDatabase, date: string, kicks: number) {
+  await db.runAsync(
+    `INSERT INTO kick_logs (date, kicks, updated_at)
+     VALUES (?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(date) DO UPDATE SET
+       kicks = excluded.kicks,
+       updated_at = CURRENT_TIMESTAMP`,
+    date,
+    kicks
+  );
+}
+
+export async function getKickCount(db: SQLiteDatabase, date: string): Promise<number> {
+  const row = await db.getFirstAsync<KickLog>("SELECT * FROM kick_logs WHERE date = ?", date);
+  return row?.kicks ?? 0;
 }
