@@ -70,5 +70,52 @@ export async function initDatabase(db: SQLiteDatabase) {
       kicks INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS clinician_draft (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      medications TEXT,
+      questions TEXT,
+      bp_systolic INTEGER,
+      bp_diastolic INTEGER,
+      temperature_c REAL,
+      glucose_mg_dl REAL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS insurance_policies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      policy_number TEXT NOT NULL,
+      maternity_coverage_percent REAL NOT NULL DEFAULT 0,
+      deductible REAL,
+      out_of_pocket_limit REAL,
+      maternity_cover_limit REAL,
+      renewal_date TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS insurance_claims (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      policy_id INTEGER,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL,
+      estimated_amount REAL,
+      submission_deadline TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(policy_id) REFERENCES insurance_policies(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS insurance_claim_documents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      claim_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      uri TEXT NOT NULL,
+      mime_type TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(claim_id) REFERENCES insurance_claims(id) ON DELETE CASCADE
+    );
   `);
 }

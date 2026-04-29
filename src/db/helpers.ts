@@ -1,5 +1,16 @@
 import { SQLiteDatabase } from "expo-sqlite";
-import { Entry, FeedActivity, KickLog, Profile, Reminder, SymptomLog } from "@/types";
+import {
+  ClinicianDraft,
+  Entry,
+  FeedActivity,
+  InsuranceClaim,
+  InsuranceClaimDocument,
+  InsurancePolicy,
+  KickLog,
+  Profile,
+  Reminder,
+  SymptomLog,
+} from "@/types";
 
 export async function getProfile(db: SQLiteDatabase): Promise<Profile | null> {
   return db.getFirstAsync<Profile>("SELECT * FROM profile ORDER BY id DESC LIMIT 1");
@@ -244,4 +255,189 @@ export async function setKickCount(db: SQLiteDatabase, date: string, kicks: numb
 export async function getKickCount(db: SQLiteDatabase, date: string): Promise<number> {
   const row = await db.getFirstAsync<KickLog>("SELECT * FROM kick_logs WHERE date = ?", date);
   return row?.kicks ?? 0;
+}
+
+export async function getClinicianDraft(db: SQLiteDatabase): Promise<ClinicianDraft | null> {
+  return db.getFirstAsync<ClinicianDraft>("SELECT * FROM clinician_draft WHERE id = 1");
+}
+
+export async function upsertClinicianDraft(
+  db: SQLiteDatabase,
+  payload: {
+    medications: string;
+    questions: string;
+    bpSystolic: number | null;
+    bpDiastolic: number | null;
+    temperatureC: number | null;
+    glucoseMgDl: number | null;
+  }
+) {
+  await db.runAsync(
+    `INSERT INTO clinician_draft
+      (id, medications, questions, bp_systolic, bp_diastolic, temperature_c, glucose_mg_dl, updated_at)
+     VALUES (1, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(id) DO UPDATE SET
+      medications = excluded.medications,
+      questions = excluded.questions,
+      bp_systolic = excluded.bp_systolic,
+      bp_diastolic = excluded.bp_diastolic,
+      temperature_c = excluded.temperature_c,
+      glucose_mg_dl = excluded.glucose_mg_dl,
+      updated_at = CURRENT_TIMESTAMP`,
+    payload.medications.trim() || null,
+    payload.questions.trim() || null,
+    payload.bpSystolic,
+    payload.bpDiastolic,
+    payload.temperatureC,
+    payload.glucoseMgDl
+  );
+}
+
+export async function getRecentEntriesForReport(db: SQLiteDatabase, days = 14): Promise<Entry[]> {
+  return db.getAllAsync<Entry>(
+    "SELECT * FROM entries WHERE date >= date('now', ?) ORDER BY date DESC",
+    `-${days} day`
+  );
+}
+
+export async function getRecentSymptomLogs(db: SQLiteDatabase, days = 14): Promise<SymptomLog[]> {
+  return db.getAllAsync<SymptomLog>(
+    "SELECT * FROM symptom_logs WHERE date >= date('now', ?) ORDER BY date DESC, created_at DESC",
+    `-${days} day`
+  );
+}
+
+export async function getInsurancePolicies(db: SQLiteDatabase): Promise<InsurancePolicy[]> {
+  return db.getAllAsync<InsurancePolicy>("SELECT * FROM insurance_policies ORDER BY updated_at DESC");
+}
+
+export async function saveInsurancePolicy(
+  db: SQLiteDatabase,
+  payload: {
+    id?: number;
+    provider: string;
+    policyNumber: string;
+    maternityCoveragePercent: number;
+    deductible: number | null;
+    outOfPocketLimit: number | null;
+    maternityCoverLimit: number | null;
+    renewalDate: string | null;
+  }
+) {
+  if (payload.id) {
+    await db.runAsync(
+      `UPDATE insurance_policies SET
+        provider = ?,
+        policy_number = ?,
+        maternity_coverage_percent = ?,
+        deductible = ?,
+        out_of_pocket_limit = ?,
+        maternity_cover_limit = ?,
+        renewal_date = ?,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      payload.provider.trim(),
+      payload.policyNumber.trim(),
+      payload.maternityCoveragePercent,
+      payload.deductible,
+      payload.outOfPocketLimit,
+      payload.maternityCoverLimit,
+      payload.renewalDate,
+      payload.id
+    );
+    return;
+  }
+
+  await db.runAsync(
+    `INSERT INTO insurance_policies
+      (provider, policy_number, maternity_coverage_percent, deductible, out_of_pocket_limit, maternity_cover_limit, renewal_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    payload.provider.trim(),
+    payload.policyNumber.trim(),
+    payload.maternityCoveragePercent,
+    payload.deductible,
+    payload.outOfPocketLimit,
+    payload.maternityCoverLimit,
+    payload.renewalDate
+  );
+}
+
+export async function getInsuranceClaims(db: SQLiteDatabase): Promise<InsuranceClaim[]> {
+  return db.getAllAsync<InsuranceClaim>("SELECT * FROM insurance_claims ORDER BY updated_at DESC");
+}
+
+export async function saveInsuranceClaim(
+  db: SQLiteDatabase,
+  payload: {
+    id?: number;
+    policyId: number | null;
+    title: string;
+    status: InsuranceClaim["status"];
+    estimatedAmount: number | null;
+    submissionDeadline: string | null;
+    notes: string;
+  }
+) {
+  if (payload.id) {
+    await db.runAsync(
+      `UPDATE insurance_claims SET
+        policy_id = ?,
+        title = ?,
+        status = ?,
+        estimated_amount = ?,
+        submission_deadline = ?,
+        notes = ?,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      payload.policyId,
+      payload.title.trim(),
+      payload.status,
+      payload.estimatedAmount,
+      payload.submissionDeadline,
+      payload.notes.trim() || null,
+      payload.id
+    );
+    return;
+  }
+
+  await db.runAsync(
+    `INSERT INTO insurance_claims
+      (policy_id, title, status, estimated_amount, submission_deadline, notes)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    payload.policyId,
+    payload.title.trim(),
+    payload.status,
+    payload.estimatedAmount,
+    payload.submissionDeadline,
+    payload.notes.trim() || null
+  );
+}
+
+export async function getInsuranceClaimDocuments(
+  db: SQLiteDatabase,
+  claimId: number
+): Promise<InsuranceClaimDocument[]> {
+  return db.getAllAsync<InsuranceClaimDocument>(
+    "SELECT * FROM insurance_claim_documents WHERE claim_id = ? ORDER BY created_at DESC",
+    claimId
+  );
+}
+
+export async function addInsuranceClaimDocument(
+  db: SQLiteDatabase,
+  payload: {
+    claimId: number;
+    name: string;
+    uri: string;
+    mimeType: string | null;
+  }
+) {
+  await db.runAsync(
+    `INSERT INTO insurance_claim_documents (claim_id, name, uri, mime_type)
+     VALUES (?, ?, ?, ?)`,
+    payload.claimId,
+    payload.name.trim(),
+    payload.uri,
+    payload.mimeType
+  );
 }

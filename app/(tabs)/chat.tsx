@@ -14,7 +14,7 @@ import {
   View,
 } from "react-native";
 import * as Speech from "expo-speech";
-import { AlertTriangle, Heart, Mic, Plus, SendHorizontal, Volume2, VolumeX } from "lucide-react-native";
+import { AlertTriangle, Camera, Heart, Mic, Plus, SendHorizontal, Volume2, VolumeX } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { LanguageSelector } from "@/components/LanguageSelector";
 
@@ -566,6 +566,10 @@ export default function ChatScreen() {
         <View style={styles.inputRow}>
           <TouchableOpacity style={styles.attachBtn}>
             <Plus size={18} color="#6B7A9C" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.attachBtn} onPress={() => router.push("/nutrition-scanner")}>
+            <Camera size={18} color="#6B7A9C" />
           </TouchableOpacity>
 
           <View style={styles.whatsappComposer}>

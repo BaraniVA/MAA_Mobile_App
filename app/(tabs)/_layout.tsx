@@ -72,6 +72,12 @@ export default function TabsLayout() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="nutrition-scanner"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }
