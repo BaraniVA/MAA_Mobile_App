@@ -13,8 +13,10 @@ import {
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
-import { AlertTriangle, Heart, Volume2, CalendarDays, Sparkles, ChevronRight, Heart as HeartOutline, Bookmark } from "lucide-react-native";
+import { Heart, Volume2, VolumeX, CalendarDays, Sparkles, ChevronRight, Heart as HeartOutline, Bookmark } from "lucide-react-native";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { EmergencySupportButton } from "@/components/EmergencySupportButton";
+import { speakText, stopSpeaking, localeForLanguage } from "../../src/utils/tts";
 
 import { useApp } from "@/context/AppContext";
 import { cacheAffirmation, getCachedAffirmation, getTodayEntry, upsertEntry } from "@/db/helpers";
@@ -22,6 +24,230 @@ import { healthFeedItems } from "@/data/healthFeed";
 import { colors, fonts } from "@/constants/theme";
 import { displayDate, formatToday, pregnancyWeek, trimesterFromWeek } from "@/services/date";
 import { fetchAffirmation } from "@/services/api";
+
+type HomeCopy = {
+  heroKicker: string;
+  welcomeTitle: string;
+  dueWeekTitle: (week: number) => string;
+  heroSubtitle: string;
+  datePlaceholder: string;
+  startChat: string;
+  howAreYouFeeling: string;
+  lastMoodPrefix: string;
+  dailyInsight: string;
+  nextAppointment: string;
+  noUpcomingVisits: string;
+  healthFeed: string;
+  readMore: string;
+  pregnancy: string;
+  setDueDate: string;
+  babySizePrefix: string;
+  babySizeFallback: string;
+  filterLabels: Record<string, string>;
+  moodLabels: Record<string, string>;
+  trimesterLabel: (week: number) => string;
+};
+
+const homeCopy: Record<string, HomeCopy> = {
+  English: {
+    heroKicker: "PREGNANCY JOURNEY",
+    welcomeTitle: "Hello, Mama!",
+    dueWeekTitle: (week: number) => `Week ${week}`,
+    heroSubtitle: "Set your due date to track your pregnancy journey.",
+    datePlaceholder: "mm/dd/yyyy",
+    startChat: "Start Chat",
+    howAreYouFeeling: "HOW ARE YOU FEELING?",
+    lastMoodPrefix: "Last:",
+    dailyInsight: "DAILY INSIGHT",
+    nextAppointment: "NEXT APPOINTMENT",
+    noUpcomingVisits: "No upcoming visits",
+    healthFeed: "HEALTH FEED",
+    readMore: "Read More",
+    pregnancy: "PREGNANCY",
+    setDueDate: "Set Due Date",
+    babySizePrefix: "Baby is the size of a",
+    babySizeFallback: "Baby is the size of a ...",
+    filterLabels: {
+      All: "All",
+      Nutrition: "Nutrition",
+      Exercise: "Exercise",
+      Menth: "Mental",
+    },
+    moodLabels: {
+      HAPPY: "HAPPY",
+      CALM: "CALM",
+      TIRED: "TIRED",
+      ANXIOUS: "ANXIOUS",
+      EXCITED: "EXCITED",
+    },
+    trimesterLabel: (week: number) => trimesterFromWeek(week).toUpperCase(),
+  },
+  தமிழ்: {
+    heroKicker: "கர்ப்ப பயணம்",
+    welcomeTitle: "வணக்கம், அம்மா!",
+    dueWeekTitle: (week: number) => `வாரம் ${week}`,
+    heroSubtitle: "உங்கள் கர்ப்ப முன்னேற்றத்தை கண்காணிக்க due date-ஐ அமைக்கவும்.",
+    datePlaceholder: "mm/dd/yyyy",
+    startChat: "உரையாடல் தொடங்கு",
+    howAreYouFeeling: "நீங்கள் எப்படி உணர்கிறீர்கள்?",
+    lastMoodPrefix: "கடைசி:",
+    dailyInsight: "இன்றைய குறிப்புரை",
+    nextAppointment: "அடுத்த சந்திப்பு",
+    noUpcomingVisits: "வரவிருக்கும் சந்திப்புகள் இல்லை",
+    healthFeed: "ஆரோக்கிய செய்தி",
+    readMore: "மேலும் படிக்க",
+    pregnancy: "கர்ப்பம்",
+    setDueDate: "Due date அமைக்கவும்",
+    babySizePrefix: "குழந்தையின் அளவு போல",
+    babySizeFallback: "குழந்தையின் அளவு போல ...",
+    filterLabels: {
+      All: "அனைத்தும்",
+      Nutrition: "உணவு",
+      Exercise: "உடற்பயிற்சி",
+      Menth: "மனம்",
+    },
+    moodLabels: {
+      HAPPY: "மகிழ்ச்சி",
+      CALM: "அமைதி",
+      TIRED: "சோர்வு",
+      ANXIOUS: "கவலை",
+      EXCITED: "உற்சாகம்",
+    },
+    trimesterLabel: (week: number) => trimesterFromWeek(week).toUpperCase(),
+  },
+  हिन्दी: {
+    heroKicker: "गर्भावस्था यात्रा",
+    welcomeTitle: "नमस्ते, मामा!",
+    dueWeekTitle: (week: number) => `सप्ताह ${week}`,
+    heroSubtitle: "अपनी गर्भावस्था यात्रा ट्रैक करने के लिए due date सेट करें।",
+    datePlaceholder: "mm/dd/yyyy",
+    startChat: "चैट शुरू करें",
+    howAreYouFeeling: "आप कैसा महसूस कर रही हैं?",
+    lastMoodPrefix: "अंतिम:",
+    dailyInsight: "दैनिक सुझाव",
+    nextAppointment: "अगली अपॉइंटमेंट",
+    noUpcomingVisits: "कोई आगामी विज़िट नहीं",
+    healthFeed: "स्वास्थ्य फ़ीड",
+    readMore: "और पढ़ें",
+    pregnancy: "गर्भावस्था",
+    setDueDate: "Due date सेट करें",
+    babySizePrefix: "बच्चा आकार में है",
+    babySizeFallback: "बच्चा आकार में है ...",
+    filterLabels: {
+      All: "सभी",
+      Nutrition: "पोषण",
+      Exercise: "व्यायाम",
+      Menth: "मानसिक",
+    },
+    moodLabels: {
+      HAPPY: "खुश",
+      CALM: "शांत",
+      TIRED: "थका",
+      ANXIOUS: "चिंतित",
+      EXCITED: "उत्साहित",
+    },
+    trimesterLabel: (week: number) => trimesterFromWeek(week),
+  },
+  తెలుగు: {
+    heroKicker: "గర్భధారణ ప్రయాణం",
+    welcomeTitle: "హలో, మామా!",
+    dueWeekTitle: (week: number) => `వారం ${week}`,
+    heroSubtitle: "మీ గర్భధారణ ప్రయాణాన్ని ట్రాక్ చేయడానికి due date ను సెట్ చేయండి.",
+    datePlaceholder: "mm/dd/yyyy",
+    startChat: "చాట్ ప్రారంభించండి",
+    howAreYouFeeling: "మీరు ఎలా ఉన్నారు?",
+    lastMoodPrefix: "చివరి:",
+    dailyInsight: "రోజువారీ సూచన",
+    nextAppointment: "తదుపరి అపాయింట్‌మెంట్",
+    noUpcomingVisits: "రాబోయే సందర్శనలు లేవు",
+    healthFeed: "ఆరోగ్య ఫీడ్",
+    readMore: "మరింత చదవండి",
+    pregnancy: "గర్భధారణ",
+    setDueDate: "Due date సెట్ చేయండి",
+    babySizePrefix: "బిడ్డ పరిమాణం",
+    babySizeFallback: "బిడ్డ పరిమాణం ...",
+    filterLabels: {
+      All: "అన్నీ",
+      Nutrition: "పోషణ",
+      Exercise: "వ్యాయామం",
+      Menth: "మానసిక",
+    },
+    moodLabels: {
+      HAPPY: "సంతోషంగా",
+      CALM: "ప్రశాంతంగా",
+      TIRED: "అలసటగా",
+      ANXIOUS: "ఆందోళనగా",
+      EXCITED: "ఉత్సాహంగా",
+    },
+    trimesterLabel: (week: number) => trimesterFromWeek(week),
+  },
+  मराठी: {
+    heroKicker: "गर्भावस्था प्रवास",
+    welcomeTitle: "नमस्कार, मामा!",
+    dueWeekTitle: (week: number) => `आठवडा ${week}`,
+    heroSubtitle: "तुमचा गर्भावस्था प्रवास ट्रॅक करण्यासाठी due date सेट करा.",
+    datePlaceholder: "mm/dd/yyyy",
+    startChat: "चॅट सुरू करा",
+    howAreYouFeeling: "तुम्हाला कसे वाटते?",
+    lastMoodPrefix: "शेवटचे:",
+    dailyInsight: "दैनिक सूचना",
+    nextAppointment: "पुढची भेट",
+    noUpcomingVisits: "कोणतीही आगामी भेट नाही",
+    healthFeed: "आरोग्य फीड",
+    readMore: "अधिक वाचा",
+    pregnancy: "गर्भावस्था",
+    setDueDate: "Due date सेट करा",
+    babySizePrefix: "बाळाचा आकार",
+    babySizeFallback: "बाळाचा आकार ...",
+    filterLabels: {
+      All: "सर्व",
+      Nutrition: "पोषण",
+      Exercise: "व्यायाम",
+      Menth: "मानसिक",
+    },
+    moodLabels: {
+      HAPPY: "आनंदी",
+      CALM: "शांत",
+      TIRED: "थकलेले",
+      ANXIOUS: "चिंताग्रस्त",
+      EXCITED: "उत्साही",
+    },
+    trimesterLabel: (week: number) => trimesterFromWeek(week),
+  },
+  മലയാളം: {
+    heroKicker: "ഗർഭധാരണ യാത്ര",
+    welcomeTitle: "ഹലോ, മാമാ!",
+    dueWeekTitle: (week: number) => `ആഴ്ച ${week}`,
+    heroSubtitle: "നിങ്ങളുടെ ഗർഭധാരണ യാത്ര ട്രാക്ക് ചെയ്യാൻ due date സജ്ജമാക്കുക.",
+    datePlaceholder: "mm/dd/yyyy",
+    startChat: "ചാറ്റ് ആരംഭിക്കുക",
+    howAreYouFeeling: "നിങ്ങൾക്ക് എങ്ങനെയുണ്ട്?",
+    lastMoodPrefix: "അവസാനം:",
+    dailyInsight: "ദൈനംദിന സൂചന",
+    nextAppointment: "അടുത്ത അപ്പോയിന്റ്മെന്റ്",
+    noUpcomingVisits: "വരാനിരിക്കുന്ന സന്ദർശനങ്ങൾ ഇല്ല",
+    healthFeed: "ആരോഗ്യ ഫീഡ്",
+    readMore: "കൂടുതൽ വായിക്കുക",
+    pregnancy: "ഗർഭധാരണം",
+    setDueDate: "Due date സജ്ജമാക്കുക",
+    babySizePrefix: "കുഞ്ഞിന്റെ വലുപ്പം",
+    babySizeFallback: "കുഞ്ഞിന്റെ വലുപ്പം ...",
+    filterLabels: {
+      All: "എല്ലാം",
+      Nutrition: "പോഷണം",
+      Exercise: "വ്യായാമം",
+      Menth: "മാനസികം",
+    },
+    moodLabels: {
+      HAPPY: "സന്തോഷം",
+      CALM: "ശാന്തം",
+      TIRED: "ക്ലാന്തി",
+      ANXIOUS: "ആശങ്ക",
+      EXCITED: "ആവേശം",
+    },
+    trimesterLabel: (week: number) => trimesterFromWeek(week),
+  },
+};
 
 const moods = [
   { emoji: "😊", label: "HAPPY" },
@@ -90,7 +316,7 @@ function getBabySizeLabel(week: number) {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { db, profile, reminders, refreshProfile, refreshReminders, upsertProfile, feedActivity, toggleFeedLike, toggleFeedSave } = useApp();
+  const { db, profile, reminders, refreshProfile, refreshReminders, upsertProfile, feedActivity, toggleFeedLike, toggleFeedSave, selectedLanguage } = useApp();
 
   const [todayMood, setTodayMood] = useState<(typeof moods)[number]["emoji"]>("😰");
   const [dueDateInput, setDueDateInput] = useState("");
@@ -99,6 +325,8 @@ export default function HomeScreen() {
   const [affirmation, setAffirmation] = useState("");
   const [loadingAffirmation, setLoadingAffirmation] = useState(false);
   const [activeFilter, setActiveFilter] = useState<(typeof filters)[number]>("All");
+
+  const copy = homeCopy[selectedLanguage] ?? homeCopy.English;
 
   const todayStr = formatToday();
 
@@ -192,7 +420,7 @@ export default function HomeScreen() {
 
   const hasDueDate = !!dueDateValue;
   const journeyWeek = hasDueDate ? pregnancyWeek(formatDateForStorage(dueDateValue)) : 0;
-  const journeyTrimester = hasDueDate ? trimesterFromWeek(journeyWeek).toUpperCase() : "";
+  const journeyTrimester = hasDueDate ? copy.trimesterLabel(journeyWeek) : "";
   const babySize = hasDueDate ? getBabySizeLabel(journeyWeek) : "";
   const daysToGo = hasDueDate
     ? Math.max(
@@ -205,6 +433,18 @@ export default function HomeScreen() {
     return new Map(feedActivity.map((item) => [item.slug, item]));
   }, [feedActivity]);
 
+  const visibleFeedItems = useMemo(() => {
+    if (activeFilter === "All") {
+      return healthFeedItems;
+    }
+
+    if (activeFilter === "Menth") {
+      return healthFeedItems.filter((item) => item.section === "MENTAL HEALTH");
+    }
+
+    return healthFeedItems.filter((item) => item.section === activeFilter.toUpperCase());
+  }, [activeFilter]);
+
   const onQuickSupportPress = (topic: string) => {
     const question =
       quickSupportPrompts[topic] ?? `I need guidance about ${topic.toLowerCase()} during pregnancy.`;
@@ -215,7 +455,32 @@ export default function HomeScreen() {
     });
   };
 
-  const lastMoodLabel = moods.find((m) => m.emoji === todayMood)?.label ?? "ANXIOUS";
+  const lastMoodKey = moods.find((m) => m.emoji === todayMood)?.label ?? "ANXIOUS";
+  const lastMoodLabel = copy.moodLabels[lastMoodKey] ?? lastMoodKey;
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  const speakHomeSummary = async () => {
+    const locale = localeForLanguage(selectedLanguage);
+    const hasDueDate = !!dueDateValue;
+    const summary = hasDueDate
+      ? `Welcome to Maternal. You are ${copy.dueWeekTitle(journeyWeek)}. ${babySize ? `Baby is the size of ${babySize}.` : ""}`
+      : `Welcome to Maternal. Set your due date to track your pregnancy journey.`;
+
+    if (isSpeaking) {
+      await stopSpeaking();
+      setIsSpeaking(false);
+      return;
+    }
+
+    setIsSpeaking(true);
+    try {
+      await speakText(summary, locale);
+    } catch (err) {
+      console.debug("TTS failed on Home", err);
+    } finally {
+      setIsSpeaking(false);
+    }
+  };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -235,18 +500,16 @@ export default function HomeScreen() {
 
         <View style={styles.headerRight}>
           <LanguageSelector />
-          <TouchableOpacity style={styles.emergencyPillBtn} onPress={() => router.push("/emergency") }>
-            <AlertTriangle size={14} color={colors.white} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconPillBtn}>
-            <Volume2 size={16} color={colors.brand} />
+          <EmergencySupportButton onPress={() => router.push("/emergency")} />
+          <TouchableOpacity style={styles.iconPillBtn} onPress={() => speakHomeSummary().catch(() => undefined)}>
+            {isSpeaking ? <VolumeX size={16} color={colors.brand} /> : <Volume2 size={16} color={colors.brand} />}
           </TouchableOpacity>
         </View>
       </View>
 
       <View style={styles.heroCard}>
-        <Text style={styles.heroKicker}>{hasDueDate ? "PREGNANCY JOURNEY" : "WELCOME BACK"}</Text>
-        <Text style={styles.heroTitle}>{hasDueDate ? `Week ${journeyWeek}` : "Hello, Mama!"}</Text>
+          <Text style={styles.heroKicker}>{hasDueDate ? copy.heroKicker : copy.welcomeTitle}</Text>
+        <Text style={styles.heroTitle}>{hasDueDate ? copy.dueWeekTitle(journeyWeek) : copy.welcomeTitle}</Text>
         {hasDueDate ? (
           <>
             <View style={styles.heroJourneyMetaRow}>
@@ -261,7 +524,7 @@ export default function HomeScreen() {
             </Text>
           </>
         ) : (
-          <Text style={styles.heroSubtitle}>Set your due date to track your pregnancy journey.</Text>
+          <Text style={styles.heroSubtitle}>{copy.heroSubtitle}</Text>
         )}
 
         <View style={styles.heroActionsRow}>
@@ -271,7 +534,7 @@ export default function HomeScreen() {
               onChangeText={setDueDateInput}
               onSubmitEditing={onDueDateInputSubmit}
               onEndEditing={onDueDateInputSubmit}
-              placeholder="mm/dd/yyyy"
+              placeholder={copy.datePlaceholder}
               placeholderTextColor="rgba(255,255,255,0.9)"
               style={styles.dateInput}
             />
@@ -280,25 +543,26 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
           <TouchableOpacity style={styles.startChatBtn} onPress={() => router.push("/(tabs)/chat") }>
-            <Text style={styles.startChatText}>Start Chat</Text>
+            <Text style={styles.startChatText}>{copy.startChat}</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       <View style={styles.sectionHeadRow}>
-        <Text style={styles.sectionHeadText}>HOW ARE YOU FEELING?</Text>
-        <Text style={styles.sectionHeadLast}>Last: <Text style={styles.sectionHeadLastValue}>{lastMoodLabel}</Text></Text>
+        <Text style={styles.sectionHeadText}>{copy.howAreYouFeeling}</Text>
+        <Text style={styles.sectionHeadLast}>{copy.lastMoodPrefix} <Text style={styles.sectionHeadLastValue}>{lastMoodLabel}</Text></Text>
       </View>
 
       <View style={styles.moodRow}>
         {moods.map((m) => {
           const active = m.emoji === todayMood;
+          const moodLabel = copy.moodLabels[m.label] ?? m.label;
           return (
             <View key={m.label} style={styles.moodItem}>
               <TouchableOpacity style={[styles.moodButton, active && styles.moodButtonActive]} onPress={() => persistMood(m.emoji)}>
                 <Text style={styles.moodEmoji}>{m.emoji}</Text>
               </TouchableOpacity>
-              <Text style={[styles.moodLabel, active && styles.moodLabelActive]}>{m.label}</Text>
+              <Text style={[styles.moodLabel, active && styles.moodLabelActive]}>{moodLabel}</Text>
             </View>
           );
         })}
@@ -309,7 +573,7 @@ export default function HomeScreen() {
           <Sparkles size={18} color={colors.brand} />
         </View>
         <View style={styles.surfaceTextWrap}>
-          <Text style={styles.surfaceTag}>DAILY INSIGHT</Text>
+          <Text style={styles.surfaceTag}>{copy.dailyInsight}</Text>
           {loadingAffirmation ? (
             <ActivityIndicator size="small" color={colors.brand} />
           ) : (
@@ -325,27 +589,27 @@ export default function HomeScreen() {
           <CalendarDays size={18} color={colors.brand} />
         </View>
         <View style={styles.surfaceTextWrap}>
-          <Text style={styles.surfaceTagMuted}>NEXT APPOINTMENT</Text>
-          <Text style={styles.surfaceBodyMuted}>{nextAppointment ? displayDate(nextAppointment.remind_at) : "No upcoming visits"}</Text>
+          <Text style={styles.surfaceTagMuted}>{copy.nextAppointment}</Text>
+          <Text style={styles.surfaceBodyMuted}>{nextAppointment ? displayDate(nextAppointment.remind_at) : copy.noUpcomingVisits}</Text>
         </View>
         <ChevronRight size={16} color="#C7C7CC" />
       </TouchableOpacity>
 
       <View style={styles.feedHeadWrap}>
-        <Text style={styles.feedHeadTitle}>HEALTH FEED</Text>
+        <Text style={styles.feedHeadTitle}>{copy.healthFeed}</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
           {filters.map((f) => {
             const active = f === activeFilter;
             return (
               <TouchableOpacity key={f} style={[styles.filterPill, active && styles.filterPillActive]} onPress={() => setActiveFilter(f)}>
-                <Text style={[styles.filterPillText, active && styles.filterPillTextActive]}>{f}</Text>
+                <Text style={[styles.filterPillText, active && styles.filterPillTextActive]}>{copy.filterLabels[f] ?? f}</Text>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
       </View>
 
-      {healthFeedItems.map((item) => {
+      {visibleFeedItems.map((item) => {
         const activity = feedActivityMap.get(item.slug);
         const isLiked = activity?.liked === 1;
         const isSaved = activity?.saved === 1;
@@ -367,7 +631,7 @@ export default function HomeScreen() {
             <Text style={styles.feedTitle}>{item.title}</Text>
             <Text style={styles.feedSubtitle}>{item.subtitle}</Text>
             <View style={styles.feedBottom}>
-              <Text style={styles.readMore}>Read More</Text>
+              <Text style={styles.readMore}>{copy.readMore}</Text>
               <View style={styles.feedActions}>
                 <TouchableOpacity
                   onPress={(event) => {
@@ -396,31 +660,45 @@ export default function HomeScreen() {
       })}
 
       <View style={styles.statsRow}>
-        <View style={styles.dueDateCard}>
-          <Text style={styles.statsKicker}>PREGNANCY</Text>
-          <Text style={styles.dueDateTitle}>{hasDueDate ? `Week ${journeyWeek}` : "Set Due Date"}</Text>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          style={styles.dueDateCard}
+          onPress={() => router.push("/(tabs)/profile")}
+          accessibilityRole="button"
+          accessibilityLabel="Open set due date"
+          accessibilityHint="Opens profile settings where you can update your due date"
+        >
+          <Text style={styles.statsKicker}>{copy.pregnancy}</Text>
+          <Text style={styles.dueDateTitle}>{hasDueDate ? copy.dueWeekTitle(journeyWeek) : copy.setDueDate}</Text>
           <Text style={styles.dueDateSub}>
             {hasDueDate ? (
               <>
-                Baby is the size of a <Text style={styles.dueDateAccent}>{babySize}</Text>
+                {copy.babySizePrefix} <Text style={styles.dueDateAccent}>{babySize}</Text>
               </>
             ) : (
-              "Baby is the size of a ..."
+              copy.babySizeFallback
             )}
           </Text>
           <View style={styles.dueDateProgressTrack}>
             <View style={[styles.dueDateProgressFill, { width: `${hasDueDate ? journeyProgress : 0}%` }]} />
           </View>
-        </View>
+        </TouchableOpacity>
 
-        <View style={styles.kickCard}>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          style={styles.kickCard}
+          onPress={() => router.push("/(tabs)/health")}
+          accessibilityRole="button"
+          accessibilityLabel="Open kick counter"
+          accessibilityHint="Opens health screen to track baby kicks"
+        >
           <View style={styles.kickIcon}>
             <Sparkles size={18} color="#F6A623" />
           </View>
           <Text style={styles.kickCount}>0 Kicks</Text>
           <Text style={styles.kickTitle}>Kick Counter</Text>
           <Text style={styles.kickSub}>Track baby's movement.</Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.quickWrap}>

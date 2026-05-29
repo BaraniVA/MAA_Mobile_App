@@ -13,7 +13,6 @@ import { useRouter } from "expo-router";
 import {
   Activity,
   AlertCircle,
-  AlertTriangle,
   CalendarDays,
   Check,
   Heart,
@@ -21,9 +20,12 @@ import {
   Plus,
   Trash2,
   Volume2,
+  VolumeX,
   X,
 } from "lucide-react-native";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { EmergencySupportButton } from "@/components/EmergencySupportButton";
+import { speakText, stopSpeaking, localeForLanguage } from "../../src/utils/tts";
 
 import { colors, fonts } from "@/constants/theme";
 import { useApp } from "@/context/AppContext";
@@ -47,6 +49,29 @@ function parseSymptomEntry(value: string) {
 export default function HealthScreen() {
   const router = useRouter();
   const { db } = useApp();
+
+  const { selectedLanguage } = useApp();
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  const speakHealthSummary = async () => {
+    const locale = localeForLanguage(selectedLanguage);
+    const summary = `Symptom tracker. You have logged ${symptomLogs.length} recent entries.`;
+
+    if (isSpeaking) {
+      await stopSpeaking();
+      setIsSpeaking(false);
+      return;
+    }
+
+    setIsSpeaking(true);
+    try {
+      await speakText(summary, locale);
+    } catch (err) {
+      console.debug("TTS failed on Health", err);
+    } finally {
+      setIsSpeaking(false);
+    }
+  };
 
   const [kicks, setKicks] = useState(0);
   const [symptoms, setSymptoms] = useState<string[]>([]);
@@ -176,11 +201,9 @@ export default function HealthScreen() {
 
           <View style={styles.headerRight}>
             <LanguageSelector />
-            <TouchableOpacity style={styles.emergencyPillBtn} onPress={() => router.push("/emergency") }>
-              <AlertTriangle size={14} color={colors.white} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.iconPillBtn}>
-              <Volume2 size={16} color={colors.brand} />
+            <EmergencySupportButton onPress={() => router.push("/emergency")} />
+            <TouchableOpacity style={styles.iconPillBtn} onPress={() => speakHealthSummary().catch(() => undefined)}>
+              {isSpeaking ? <VolumeX size={16} color={colors.brand} /> : <Volume2 size={16} color={colors.brand} />}
             </TouchableOpacity>
           </View>
         </View>

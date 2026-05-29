@@ -11,6 +11,7 @@ import {
   Reminder,
   SymptomLog,
 } from "@/types";
+import { isValidProfileName, parseDueDateInput } from "@/services/date";
 
 export async function getProfile(db: SQLiteDatabase): Promise<Profile | null> {
   return db.getFirstAsync<Profile>("SELECT * FROM profile ORDER BY id DESC LIMIT 1");
@@ -27,13 +28,23 @@ export async function saveProfile(
     preferredVoice?: string;
   }
 ) {
+  if (!isValidProfileName(payload.name)) {
+    throw new Error("Invalid profile name.");
+  }
+
+  if (!parseDueDateInput(payload.dueDate)) {
+    throw new Error("Invalid due date.");
+  }
+
+  const normalizedName = payload.name.trim();
+  const normalizedDueDate = payload.dueDate.trim();
   const existing = await getProfile(db);
   if (!existing) {
     await db.runAsync(
       `INSERT INTO profile (name, due_date, blood_type, doctor_name, doctor_phone, preferred_voice)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      payload.name,
-      payload.dueDate,
+      normalizedName,
+      normalizedDueDate,
       payload.bloodType ?? null,
       payload.doctorName ?? null,
       payload.doctorPhone ?? null,
@@ -51,8 +62,8 @@ export async function saveProfile(
       doctor_phone = ?,
       preferred_voice = ?
      WHERE id = ?`,
-    payload.name,
-    payload.dueDate,
+    normalizedName,
+    normalizedDueDate,
     payload.bloodType ?? null,
     payload.doctorName ?? null,
     payload.doctorPhone ?? null,

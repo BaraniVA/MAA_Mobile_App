@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useRouter } from "expo-router";
-import { AlertTriangle, Heart, Play, RotateCcw, Volume2, Activity, VolumeX } from "lucide-react-native";
+import { Heart, Play, RotateCcw, Volume2, Activity, VolumeX } from "lucide-react-native";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { EmergencySupportButton } from "@/components/EmergencySupportButton";
+import { speakText, stopSpeaking, localeForLanguage } from "../../src/utils/tts";
 
 import { addSession } from "@/db/helpers";
 import { useApp } from "@/context/AppContext";
@@ -36,7 +38,28 @@ const poses: PoseItem[] = [
 
 export default function YogaScreen() {
   const router = useRouter();
-  const { db } = useApp();
+  const { db, selectedLanguage } = useApp();
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  const speakYogaSummary = async () => {
+    const locale = localeForLanguage(selectedLanguage);
+    const summary = `Pregnancy yoga. Current pose: ${pose.title}. Duration ${pose.seconds} seconds.`;
+
+    if (isSpeaking) {
+      await stopSpeaking();
+      setIsSpeaking(false);
+      return;
+    }
+
+    setIsSpeaking(true);
+    try {
+      await speakText(summary, locale);
+    } catch (err) {
+      console.debug("TTS failed on Yoga", err);
+    } finally {
+      setIsSpeaking(false);
+    }
+  };
 
   const [index, setIndex] = useState(0);
   const [remaining, setRemaining] = useState(poses[0].seconds);
@@ -114,11 +137,9 @@ export default function YogaScreen() {
 
         <View style={styles.headerRight}>
           <LanguageSelector />
-          <TouchableOpacity style={styles.emergencyPillBtn} onPress={() => router.push("/emergency") }>
-            <AlertTriangle size={14} color={colors.white} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconPillBtn}>
-            <Volume2 size={16} color={colors.brand} />
+          <EmergencySupportButton onPress={() => router.push("/emergency")} />
+          <TouchableOpacity style={styles.iconPillBtn} onPress={() => speakYogaSummary().catch(() => undefined)}>
+            {isSpeaking ? <VolumeX size={16} color={colors.brand} /> : <Volume2 size={16} color={colors.brand} />}
           </TouchableOpacity>
         </View>
       </View>

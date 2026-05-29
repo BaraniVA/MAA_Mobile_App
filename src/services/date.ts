@@ -11,8 +11,37 @@ export function displayDate(isoDate: string) {
   });
 }
 
+export function isValidProfileName(value: string) {
+  return /^[a-zA-Z\s\-'.]+$/.test(value.trim());
+}
+
+export function parseDueDateInput(value: string) {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
 export function pregnancyWeek(dueDate: string) {
-  const due = new Date(dueDate);
+  const due = parseDueDateInput(dueDate);
+  if (!due) {
+    return 0;
+  }
+
   const conception = new Date(due);
   conception.setDate(conception.getDate() - 280);
   const now = new Date();

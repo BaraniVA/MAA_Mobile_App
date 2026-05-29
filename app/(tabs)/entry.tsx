@@ -13,7 +13,6 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import {
-  AlertTriangle,
   Bell,
   Calendar,
   Circle,
@@ -30,9 +29,12 @@ import {
   Sparkles,
   Trash2,
   Volume2,
+  VolumeX,
   X,
 } from "lucide-react-native";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { EmergencySupportButton } from "@/components/EmergencySupportButton";
+import { speakText, stopSpeaking, localeForLanguage } from "../../src/utils/tts";
 
 import { useApp } from "@/context/AppContext";
 import { colors, fonts } from "@/constants/theme";
@@ -131,7 +133,28 @@ function parseTabletTitle(title: string) {
 
 export default function EntryScreen() {
   const router = useRouter();
-  const { reminders, refreshReminders, upsertReminder, removeReminder } = useApp();
+  const { reminders, refreshReminders, upsertReminder, removeReminder, selectedLanguage } = useApp();
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  const speakEntrySummary = async () => {
+    const locale = localeForLanguage(selectedLanguage);
+    const summary = `Daily tablets and reminders. You have ${displayTabletItems ? displayTabletItems.length : 0} items scheduled.`;
+
+    if (isSpeaking) {
+      await stopSpeaking();
+      setIsSpeaking(false);
+      return;
+    }
+
+    setIsSpeaking(true);
+    try {
+      await speakText(summary, locale);
+    } catch (err) {
+      console.debug("TTS failed on Entry", err);
+    } finally {
+      setIsSpeaking(false);
+    }
+  };
   const [showTabletModal, setShowTabletModal] = useState(false);
   const [showVisitModal, setShowVisitModal] = useState(false);
   const [showReminderDropdown, setShowReminderDropdown] = useState(false);
@@ -157,6 +180,17 @@ export default function EntryScreen() {
     next.setHours(16, 0, 0, 0);
     return next;
   });
+  const [calendarMonthDate, setCalendarMonthDate] = useState(() => {
+    const next = new Date();
+    next.setDate(1);
+    next.setHours(0, 0, 0, 0);
+    return next;
+  });
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => {
+    const next = new Date();
+    next.setHours(0, 0, 0, 0);
+    return next;
+  });
   const [leadReminderDays, setLeadReminderDays] = useState(1);
 
   const [activePicker, setActivePicker] = useState<null | "tablet-time" | "visit-date" | "visit-time">(null);
@@ -168,17 +202,47 @@ export default function EntryScreen() {
   );
 
   const now = new Date();
-  const monthName = now.toLocaleDateString("en-US", { month: "long" });
-  const year = now.getFullYear();
-  const selectedDay = now.getDate();
+  const monthName = calendarMonthDate.toLocaleDateString("en-US", { month: "long" });
+  const year = calendarMonthDate.getFullYear();
 
   const calendarCells = useMemo(() => {
-    const firstDay = new Date(year, now.getMonth(), 1).getDay();
-    const totalDays = new Date(year, now.getMonth() + 1, 0).getDate();
+    const firstDay = new Date(year, calendarMonthDate.getMonth(), 1).getDay();
+    const totalDays = new Date(year, calendarMonthDate.getMonth() + 1, 0).getDate();
     const leading = Array.from({ length: firstDay }, () => null);
     const days = Array.from({ length: totalDays }, (_, i) => i + 1);
     return [...leading, ...days];
-  }, [now, year]);
+  }, [calendarMonthDate, year]);
+
+  const goToPreviousMonth = () => {
+    setCalendarMonthDate((current) => {
+      const next = new Date(current);
+      next.setMonth(next.getMonth() - 1);
+      next.setDate(1);
+      return next;
+    });
+  };
+
+  const goToNextMonth = () => {
+    setCalendarMonthDate((current) => {
+      const next = new Date(current);
+      next.setMonth(next.getMonth() + 1);
+      next.setDate(1);
+      return next;
+    });
+  };
+
+  const onSelectCalendarDay = (day: number) => {
+    const nextSelected = new Date(year, calendarMonthDate.getMonth(), day);
+    nextSelected.setHours(0, 0, 0, 0);
+    setSelectedCalendarDate(nextSelected);
+
+    const nextVisitDate = new Date(nextSelected);
+    nextVisitDate.setHours(visitTime.getHours(), visitTime.getMinutes(), 0, 0);
+    setVisitDate(nextVisitDate);
+
+    // Open scheduling flow directly from selected date.
+    setShowVisitModal(true);
+  };
 
   const tabletItems = useMemo<TabletCard[]>(() => {
     return reminders
@@ -413,11 +477,9 @@ export default function EntryScreen() {
 
         <View style={styles.headerRight}>
           <LanguageSelector />
-          <TouchableOpacity style={styles.emergencyPillBtn} onPress={() => router.push("/emergency") }>
-            <AlertTriangle size={14} color={colors.white} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconPillBtn}>
-            <Volume2 size={16} color={colors.brand} />
+          <EmergencySupportButton onPress={() => router.push("/emergency")} />
+          <TouchableOpacity style={styles.iconPillBtn} onPress={() => speakEntrySummary().catch(() => undefined)}>
+            {isSpeaking ? <VolumeX size={16} color={colors.brand} /> : <Volume2 size={16} color={colors.brand} />}
           </TouchableOpacity>
         </View>
       </View>
@@ -483,10 +545,10 @@ export default function EntryScreen() {
         <View style={styles.calendarHead}>
           <Text style={styles.calendarMonth}>{monthName} {year}</Text>
           <View style={styles.calendarArrows}>
-            <TouchableOpacity style={styles.arrowBtn}>
+            <TouchableOpacity style={styles.arrowBtn} onPress={goToPreviousMonth}>
               <ChevronLeft size={16} color="#A9B2CA" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.arrowBtn}>
+            <TouchableOpacity style={styles.arrowBtn} onPress={goToNextMonth}>
               <ChevronRight size={16} color="#A9B2CA" />
             </TouchableOpacity>
           </View>
@@ -500,13 +562,23 @@ export default function EntryScreen() {
 
         <View style={styles.daysGrid}>
           {calendarCells.map((day, index) => {
-            const active = day === selectedDay;
+            const active =
+              day !== null &&
+              selectedCalendarDate.getDate() === day &&
+              selectedCalendarDate.getMonth() === calendarMonthDate.getMonth() &&
+              selectedCalendarDate.getFullYear() === calendarMonthDate.getFullYear();
             return (
               <View key={`${day}-${index}`} style={styles.dayCellWrap}>
                 {day ? (
-                  <View style={[styles.dayCell, active && styles.dayCellActive]}>
+                  <TouchableOpacity
+                    style={[styles.dayCell, active && styles.dayCellActive]}
+                    onPress={() => onSelectCalendarDay(day)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Select ${monthName} ${day}, ${year}`}
+                    accessibilityHint="Select date and open appointment scheduler"
+                  >
                     <Text style={[styles.dayCellText, active && styles.dayCellTextActive]}>{day}</Text>
-                  </View>
+                  </TouchableOpacity>
                 ) : (
                   <View style={styles.dayCellEmpty} />
                 )}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Modal,
+  Platform,
   ScrollView,
   Share,
   StyleSheet,
@@ -10,9 +12,13 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import * as DocumentPicker from "expo-document-picker";
-import { AlertTriangle, ChevronDown, ChevronUp, FileText, Heart, Settings, ShieldCheck, UserRound, Volume2 } from "lucide-react-native";
+import { CalendarDays, ChevronDown, ChevronUp, FileText, Heart, Settings, ShieldCheck, UserRound, Volume2, VolumeX } from "lucide-react-native";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { EmergencySupportButton } from "@/components/EmergencySupportButton";
+import * as Speech from "expo-speech";
+import { speakText, stopSpeaking, localeForLanguage } from "../../src/utils/tts";
 
 import { colors, fonts } from "@/constants/theme";
 import { useApp } from "@/context/AppContext";
@@ -29,7 +35,7 @@ import {
   saveInsurancePolicy,
   upsertClinicianDraft,
 } from "@/db/helpers";
-import { pregnancyWeek } from "@/services/date";
+import { isValidProfileName, parseDueDateInput, pregnancyWeek } from "@/services/date";
 import { ClaimStatus, InsuranceClaim, InsuranceClaimDocument, InsurancePolicy } from "@/types";
 
 const milestones = [
@@ -59,10 +65,262 @@ function daysUntil(dateValue: string | null): number | null {
   return Math.round(diff / (1000 * 60 * 60 * 24));
 }
 
+function formatDateForStorage(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateForDisplay(date: Date) {
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export default function ProfileScreen() {
   const router = useRouter();
-  const { db, profile, feedActivity, upsertReminder } = useApp();
+  const { db, profile, feedActivity, upsertReminder, upsertProfile, t, selectedLanguage } = useApp();
   const [activityTab, setActivityTab] = useState<"liked" | "saved">("liked");
+
+  const onEmergencyPress = () => {
+    Alert.alert(
+      t("sos_alert_title"),
+      t("sos_alert_body"),
+      [
+        { text: t("cancel"), style: "cancel" },
+        { text: t("confirm"), onPress: () => router.push("/emergency") }
+      ]
+    );
+  };
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsForm, setSettingsForm] = useState({
+    name: "",
+    dueDate: "",
+    bloodType: "",
+    doctorName: "",
+    doctorPhone: "",
+    preferredVoice: "",
+  });
+  const [settingsDueDateValue, setSettingsDueDateValue] = useState<Date | null>(null);
+  const [showDueDatePicker, setShowDueDatePicker] = useState(false);
+  const [settingsFieldErrors, setSettingsFieldErrors] = useState<Partial<Record<keyof typeof settingsForm, string>>>({});
+  const [settingsError, setSettingsError] = useState("");
+
+  const clearSettingsFieldError = (field: keyof typeof settingsForm) => {
+    setSettingsFieldErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const setSettingsFieldError = (field: keyof typeof settingsForm, message: string) => {
+    setSettingsFieldErrors((current) => ({ ...current, [field]: message }));
+  };
+
+  const validateName = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setSettingsFieldError("name", "First name is required.");
+      return false;
+    }
+
+    if (!isValidProfileName(trimmed)) {
+      setSettingsFieldError("name", "Use only letters, spaces, hyphens, periods, or apostrophes.");
+      return false;
+    }
+
+    clearSettingsFieldError("name");
+    return true;
+  };
+
+  const validateBloodType = (value: string) => {
+    const trimmed = value.trim().toUpperCase();
+    if (!trimmed) {
+      clearSettingsFieldError("bloodType");
+      return true;
+    }
+
+    const validBloodTypes = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+    if (!validBloodTypes.includes(trimmed)) {
+      setSettingsFieldError("bloodType", "Choose one of: A+, A-, B+, B-, AB+, AB-, O+, O-.");
+      return false;
+    }
+
+    clearSettingsFieldError("bloodType");
+    return true;
+  };
+
+  const validateDoctorName = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      clearSettingsFieldError("doctorName");
+      return true;
+    }
+
+    const nameRegex = /^[a-zA-Z\s\-'\.]+$/;
+    if (!nameRegex.test(trimmed)) {
+      setSettingsFieldError("doctorName", "Use only letters, spaces, hyphens, periods, or apostrophes.");
+      return false;
+    }
+
+    clearSettingsFieldError("doctorName");
+    return true;
+  };
+
+  const validateDoctorPhone = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      clearSettingsFieldError("doctorPhone");
+      return true;
+    }
+
+    const phoneRegex = /^\+?[0-9\s\-\(\)]{7,20}$/;
+    if (!phoneRegex.test(trimmed)) {
+      setSettingsFieldError("doctorPhone", "Enter a valid phone number.");
+      return false;
+    }
+
+    clearSettingsFieldError("doctorPhone");
+    return true;
+  };
+
+  const validatePreferredVoice = () => {
+    clearSettingsFieldError("preferredVoice");
+    return true;
+  };
+
+  const minDueDate = useMemo(() => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - 14);
+    return date;
+  }, []);
+
+  const maxDueDate = useMemo(() => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + 294);
+    return date;
+  }, []);
+
+  const openSettings = () => {
+    const parsedDueDate = profile?.due_date ? parseDueDateInput(profile.due_date) : null;
+    setSettingsForm({
+      name: profile?.name ?? "",
+      dueDate: profile?.due_date ?? "",
+      bloodType: profile?.blood_type ?? "",
+      doctorName: profile?.doctor_name ?? "",
+      doctorPhone: profile?.doctor_phone ?? "",
+      preferredVoice: profile?.preferred_voice ?? "",
+    });
+    setSettingsDueDateValue(parsedDueDate);
+    setShowDueDatePicker(false);
+    setSettingsError("");
+    setSettingsFieldErrors({});
+    setIsSettingsOpen(true);
+  };
+
+  const onDueDatePickerChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (event.type === "dismissed") {
+      setShowDueDatePicker(false);
+      return;
+    }
+
+    if (!selectedDate) return;
+
+    const normalized = new Date(selectedDate);
+    normalized.setHours(0, 0, 0, 0);
+
+    setSettingsDueDateValue(normalized);
+    setSettingsForm((current) => ({ ...current, dueDate: formatDateForStorage(normalized) }));
+    clearSettingsFieldError("dueDate");
+    setSettingsError("");
+
+    if (Platform.OS !== "ios") {
+      setShowDueDatePicker(false);
+    }
+  };
+
+  const onSaveSettings = async () => {
+    const nextFieldErrors: Partial<Record<keyof typeof settingsForm, string>> = {};
+    const trimmedName = settingsForm.name.trim();
+    const trimmedDate = settingsForm.dueDate.trim();
+
+    if (!validateName(settingsForm.name)) {
+      nextFieldErrors.name = settingsFieldErrors.name ?? "First name is required.";
+    }
+
+    if (!trimmedDate) {
+      setSettingsError("Please enter your name and due date.");
+      nextFieldErrors.dueDate = "Due date is required.";
+      setSettingsFieldErrors(nextFieldErrors);
+      return;
+    }
+
+    const trimmedDoctorName = settingsForm.doctorName.trim();
+    if (!validateDoctorName(settingsForm.doctorName)) {
+      setSettingsError("Doctor's name can only contain letters, spaces, hyphens, periods, or apostrophes.");
+      nextFieldErrors.doctorName = "Use only letters, spaces, hyphens, periods, or apostrophes.";
+      setSettingsFieldErrors(nextFieldErrors);
+      return;
+    }
+
+    const trimmedDoctorPhone = settingsForm.doctorPhone.trim();
+    if (!validateDoctorPhone(settingsForm.doctorPhone)) {
+      setSettingsError("Doctor's phone must be a valid phone number (at least 7 digits).");
+      nextFieldErrors.doctorPhone = "Enter a valid phone number.";
+      setSettingsFieldErrors(nextFieldErrors);
+      return;
+    }
+
+    const trimmedBloodType = settingsForm.bloodType.trim().toUpperCase();
+    if (!validateBloodType(settingsForm.bloodType)) {
+      setSettingsError("Blood Type must be one of: A+, A-, B+, B-, AB+, AB-, O+, O-.");
+      nextFieldErrors.bloodType = "Choose one of: A+, A-, B+, B-, AB+, AB-, O+, O-.";
+      setSettingsFieldErrors(nextFieldErrors);
+      return;
+    }
+
+    const parsedDueDate = settingsDueDateValue ?? parseDueDateInput(trimmedDate);
+    if (!parsedDueDate) {
+      setSettingsError("Please enter a valid due date in YYYY-MM-DD format.");
+      nextFieldErrors.dueDate = "Select a due date from the calendar.";
+      setSettingsFieldErrors(nextFieldErrors);
+      return;
+    }
+
+    const normalizedDueDate = new Date(parsedDueDate);
+    normalizedDueDate.setHours(0, 0, 0, 0);
+
+    if (normalizedDueDate < minDueDate || normalizedDueDate > maxDueDate) {
+      setSettingsError("Due date must be within 42 weeks (294 days) in the future, and not in the past by more than 14 days.");
+      nextFieldErrors.dueDate = "Due date must be within the allowed pregnancy window.";
+      setSettingsFieldErrors(nextFieldErrors);
+      return;
+    }
+
+    try {
+      setSettingsFieldErrors({});
+      await upsertProfile({
+        name: trimmedName,
+        dueDate: trimmedDate,
+        bloodType: trimmedBloodType || undefined,
+        doctorName: trimmedDoctorName || undefined,
+        doctorPhone: trimmedDoctorPhone || undefined,
+        preferredVoice: settingsForm.preferredVoice.trim() || undefined,
+      });
+      setIsSettingsOpen(false);
+      Alert.alert("Success", "Profile updated successfully!");
+    } catch {
+      setSettingsError("Could not update profile. Please try again.");
+    }
+  };
   const [reportDraft, setReportDraft] = useState({
     bpSystolic: "",
     bpDiastolic: "",
@@ -101,6 +359,54 @@ export default function ProfileScreen() {
 
   const week = profile?.due_date ? pregnancyWeek(profile.due_date) : 24;
   const displayName = profile?.name?.trim() ? profile.name : "Mama Bear";
+  const weekLabel = week > 0 ? `${week} WEEKS PREGNANT` : "SET A VALID DUE DATE";
+
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  const languageToLocale: Record<string, string> = {
+    English: "en-US",
+    "தமிழ்": "ta-IN",
+    "हिन्दी": "hi-IN",
+    "తెలుగు": "te-IN",
+    "मराठी": "mr-IN",
+    "മലയാളം": "ml-IN",
+  };
+  const toggleSpeech = async () => {
+    if (isSpeaking) {
+      try {
+        await Speech.stop();
+      } catch {}
+      setIsSpeaking(false);
+      return;
+    }
+    const locale = localeForLanguage(selectedLanguage);
+
+    const safeWeek = Number.isFinite(Number(week)) && !Number.isNaN(Number(week)) ? String(week) : null;
+    const gestationPhrase = safeWeek ? `Week ${safeWeek} pregnant` : "gestational age unknown";
+    const speakPayload = `Profile summary. Name: ${displayName}. ${gestationPhrase}. Doctor: ${profile?.doctor_name || "not assigned"}.`;
+
+    if (isSpeaking) {
+      await stopSpeaking();
+      setIsSpeaking(false);
+      return;
+    }
+
+    setIsSpeaking(true);
+    try {
+      await speakText(speakPayload, locale);
+    } catch (err) {
+      console.debug("TTS speak failed", err);
+      Alert.alert("Audio error", "Could not play speech on this device.");
+    } finally {
+      setIsSpeaking(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      Speech.stop().catch(() => undefined);
+    };
+  }, []);
 
   const progress = useMemo(() => {
     const pct = Math.max(0, Math.min(100, Math.round((week / 40) * 100)));
@@ -342,11 +648,9 @@ export default function ProfileScreen() {
 
         <View style={styles.headerRight}>
           <LanguageSelector />
-          <TouchableOpacity style={styles.emergencyPillBtn} onPress={() => router.push("/emergency") }>
-            <AlertTriangle size={14} color={colors.white} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconPillBtn}>
-            <Volume2 size={16} color={colors.brand} />
+          <EmergencySupportButton onPress={onEmergencyPress} />
+          <TouchableOpacity style={styles.iconPillBtn} onPress={toggleSpeech}>
+            {isSpeaking ? <VolumeX size={16} color={colors.brand} /> : <Volume2 size={16} color={colors.brand} />}
           </TouchableOpacity>
         </View>
       </View>
@@ -355,12 +659,18 @@ export default function ProfileScreen() {
         <View style={styles.avatarWrap}>
           <UserRound size={36} color={colors.white} />
         </View>
-        <TouchableOpacity style={styles.settingsBtn}>
+        <TouchableOpacity
+          style={styles.settingsBtn}
+          onPress={openSettings}
+          accessibilityRole="button"
+          accessibilityLabel="Open profile settings"
+          hitSlop={12}
+        >
           <Settings size={14} color="#AAB5CB" />
         </TouchableOpacity>
 
         <Text style={styles.nameText}>{displayName}</Text>
-        <Text style={styles.weekText}>{week} WEEKS PREGNANT</Text>
+        <Text style={styles.weekText}>{weekLabel}</Text>
       </View>
 
       <View style={styles.journeyHead}>
@@ -737,6 +1047,145 @@ export default function ProfileScreen() {
         ) : null}
       </View>
 
+      <Modal
+        visible={isSettingsOpen}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsSettingsOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalHeaderTitle}>Edit Profile Settings</Text>
+              <TouchableOpacity onPress={() => setIsSettingsOpen(false)}>
+                <Text style={styles.closeText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.modalScroll} keyboardShouldPersistTaps="handled">
+              {settingsError ? (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorBoxText}>{settingsError}</Text>
+                </View>
+              ) : null}
+
+              <Text style={styles.modalLabel}>First Name *</Text>
+              <TextInput
+                value={settingsForm.name}
+                onChangeText={(text) => {
+                  setSettingsForm((f) => ({ ...f, name: text }));
+                  validateName(text);
+                }}
+                placeholder="e.g. Priya"
+                placeholderTextColor="#7A7A7A"
+                accessibilityLabel="First Name"
+                accessibilityHint="Required. Letters, spaces, hyphens, periods, and apostrophes only."
+                style={[styles.modalInput, settingsFieldErrors.name ? styles.modalInputError : undefined]}
+              />
+              {settingsFieldErrors.name ? <Text style={styles.fieldErrorText}>{settingsFieldErrors.name}</Text> : null}
+
+              <Text style={styles.modalLabel}>Due Date (YYYY-MM-DD) *</Text>
+              <TouchableOpacity
+                style={[styles.datePickerButton, settingsFieldErrors.dueDate ? styles.modalInputError : undefined]}
+                onPress={() => setShowDueDatePicker((current) => !current)}
+                accessibilityRole="button"
+                accessibilityLabel="Open due date calendar"
+                accessibilityHint="Required. Opens the calendar to choose your due date."
+              >
+                <Text style={[styles.datePickerButtonText, !settingsForm.dueDate && styles.datePickerPlaceholder]}>
+                  {settingsForm.dueDate && settingsDueDateValue ? formatDateForDisplay(settingsDueDateValue) : "Select due date"}
+                </Text>
+                <CalendarDays size={16} color={settingsForm.dueDate ? colors.brand : "#8EA0C2"} />
+              </TouchableOpacity>
+              {settingsFieldErrors.dueDate ? <Text style={styles.fieldErrorText}>{settingsFieldErrors.dueDate}</Text> : null}
+              {showDueDatePicker ? (
+                <View style={styles.pickerWrap}>
+                  <DateTimePicker
+                    value={settingsDueDateValue ?? new Date()}
+                    mode="date"
+                    display={Platform.OS === "ios" ? "spinner" : "default"}
+                    minimumDate={minDueDate}
+                    maximumDate={maxDueDate}
+                    onChange={onDueDatePickerChange}
+                  />
+                  {Platform.OS === "ios" ? (
+                    <TouchableOpacity style={styles.pickerDoneBtn} onPress={() => setShowDueDatePicker(false)}>
+                      <Text style={styles.pickerDoneText}>Done</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              ) : null}
+
+              <Text style={styles.modalLabel}>Blood Type (Optional)</Text>
+              <TextInput
+                value={settingsForm.bloodType}
+                onChangeText={(text) => {
+                  const nextValue = text.toUpperCase();
+                  setSettingsForm((f) => ({ ...f, bloodType: nextValue }));
+                  validateBloodType(nextValue);
+                }}
+                placeholder="e.g. O+ / B-"
+                placeholderTextColor="#7A7A7A"
+                accessibilityLabel="Blood Type"
+                accessibilityHint="Optional. Enter one of the supported blood types."
+                style={[styles.modalInput, settingsFieldErrors.bloodType ? styles.modalInputError : undefined]}
+              />
+              {settingsFieldErrors.bloodType ? <Text style={styles.fieldErrorText}>{settingsFieldErrors.bloodType}</Text> : null}
+
+              <Text style={styles.modalLabel}>Doctor Name (Optional)</Text>
+              <TextInput
+                value={settingsForm.doctorName}
+                onChangeText={(text) => {
+                  setSettingsForm((f) => ({ ...f, doctorName: text }));
+                  validateDoctorName(text);
+                }}
+                placeholder="e.g. Dr. Alpa"
+                placeholderTextColor="#7A7A7A"
+                accessibilityLabel="Doctor Name"
+                accessibilityHint="Optional. Letters, spaces, hyphens, periods, and apostrophes only."
+                style={[styles.modalInput, settingsFieldErrors.doctorName ? styles.modalInputError : undefined]}
+              />
+              {settingsFieldErrors.doctorName ? <Text style={styles.fieldErrorText}>{settingsFieldErrors.doctorName}</Text> : null}
+
+              <Text style={styles.modalLabel}>Doctor Phone (Optional)</Text>
+              <TextInput
+                value={settingsForm.doctorPhone}
+                onChangeText={(text) => {
+                  setSettingsForm((f) => ({ ...f, doctorPhone: text }));
+                  validateDoctorPhone(text);
+                }}
+                placeholder="e.g. +91 98765 43210"
+                placeholderTextColor="#7A7A7A"
+                accessibilityLabel="Doctor Phone"
+                accessibilityHint="Optional. Enter a valid phone number."
+                style={[styles.modalInput, settingsFieldErrors.doctorPhone ? styles.modalInputError : undefined]}
+                keyboardType="phone-pad"
+              />
+              {settingsFieldErrors.doctorPhone ? <Text style={styles.fieldErrorText}>{settingsFieldErrors.doctorPhone}</Text> : null}
+
+              <Text style={styles.modalLabel}>Preferred Voice (Optional)</Text>
+              <TextInput
+                value={settingsForm.preferredVoice}
+                onChangeText={(text) => {
+                  setSettingsForm((f) => ({ ...f, preferredVoice: text }));
+                  validatePreferredVoice();
+                }}
+                placeholder="e.g. en-US-language"
+                placeholderTextColor="#7A7A7A"
+                accessibilityLabel="Preferred Voice"
+                accessibilityHint="Optional. This value is used for spoken summaries."
+                style={[styles.modalInput, settingsFieldErrors.preferredVoice ? styles.modalInputError : undefined]}
+              />
+              {settingsFieldErrors.preferredVoice ? <Text style={styles.fieldErrorText}>{settingsFieldErrors.preferredVoice}</Text> : null}
+
+              <TouchableOpacity onPress={onSaveSettings} style={styles.modalSaveBtn}>
+                <Text style={styles.modalSaveBtnText}>Save Settings</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.bottomPad} />
     </ScrollView>
   );
@@ -814,7 +1263,7 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
     position: "relative",
     zIndex: 140,
   },
@@ -835,9 +1284,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   iconPillBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: "#FFF1F5",
     alignItems: "center",
     justifyContent: "center",
@@ -845,7 +1294,9 @@ const styles = StyleSheet.create({
     borderColor: "#FDE2EA",
   },
   emergencyPillBtn: {
-    width: 30,
+    flexDirection: "row",
+    gap: 4,
+    paddingHorizontal: 8,
     height: 30,
     borderRadius: 15,
     backgroundColor: "#D6285A",
@@ -856,6 +1307,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 4,
+  },
+  emergencyPillText: {
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.5,
   },
   avatarSection: {
     alignItems: "center",
@@ -887,6 +1344,8 @@ const styles = StyleSheet.create({
     borderColor: "#EAEFF8",
     alignItems: "center",
     justifyContent: "center",
+    zIndex: 10,
+    elevation: 10,
   },
   nameText: {
     marginTop: 14,
@@ -1440,5 +1899,143 @@ const styles = StyleSheet.create({
   },
   bottomPad: {
     height: 18,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    justifyContent: "flex-end",
+  },
+  modalContainer: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    maxHeight: "85%",
+    paddingBottom: 24,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F8",
+  },
+  modalHeaderTitle: {
+    fontFamily: fonts.serif,
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1D2E52",
+  },
+  closeText: {
+    fontSize: 14,
+    color: "#5E739B",
+    fontWeight: "600",
+  },
+  modalScroll: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 40,
+  },
+  modalLabel: {
+    color: "#5E739B",
+    fontWeight: "700",
+    fontSize: 11,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 6,
+    marginTop: 12,
+  },
+  modalInput: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E7ECF6",
+    backgroundColor: "#F8FAFF",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: "#223352",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  datePickerButton: {
+    minHeight: 50,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E7ECF6",
+    backgroundColor: "#F8FAFF",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  datePickerButtonText: {
+    flex: 1,
+    color: "#223352",
+    fontSize: 13,
+    fontWeight: "700",
+    marginRight: 10,
+  },
+  datePickerPlaceholder: {
+    color: "#7A7A7A",
+    fontWeight: "600",
+  },
+  modalInputError: {
+    borderColor: "#D6285A",
+    backgroundColor: "#FFF5F7",
+  },
+  pickerWrap: {
+    gap: 8,
+    marginTop: 4,
+  },
+  pickerDoneBtn: {
+    alignSelf: "flex-end",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: "#FFF0F4",
+  },
+  pickerDoneText: {
+    color: colors.brand,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  fieldErrorText: {
+    marginTop: 6,
+    color: "#B3224F",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  modalSaveBtn: {
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: colors.brand,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 24,
+    shadowColor: colors.brand,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  modalSaveBtnText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+  },
+  errorBox: {
+    backgroundColor: "#FFF0F4",
+    borderWidth: 1,
+    borderColor: "#FDE2EA",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  errorBoxText: {
+    color: colors.brand,
+    fontSize: 12,
+    fontWeight: "700",
   },
 });

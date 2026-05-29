@@ -14,9 +14,11 @@ import {
   View,
 } from "react-native";
 import * as Speech from "expo-speech";
-import { AlertTriangle, Camera, Heart, Mic, Plus, SendHorizontal, Volume2, VolumeX } from "lucide-react-native";
+import { speakText, stopSpeaking, localeForLanguage } from "../../src/utils/tts";
+import { Camera, Heart, Mic, Plus, SendHorizontal, Volume2, VolumeX } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { EmergencySupportButton } from "@/components/EmergencySupportButton";
 
 import {
   ChatMedia,
@@ -146,6 +148,94 @@ function buildFoodOnlyAnswer(question: string) {
   ].join("\n");
 }
 
+function buildQuickSupportFallbackAnswer(question: string) {
+  const normalizedQuestion = normalizeText(question);
+
+  const hasNutritionIntent =
+    normalizedQuestion.includes("what should i eat") ||
+    normalizedQuestion.includes("nutrition") ||
+    normalizedQuestion.includes("hungry") ||
+    normalizedQuestion.includes("meal") ||
+    normalizedQuestion.includes("food");
+
+  if (hasNutritionIntent) {
+    return [
+      "Try this simple pregnancy-safe meal plan for today:",
+      "- Breakfast: Oats or idli with fruit + nuts.",
+      "- Lunch: Rice/roti, dal, leafy veg, and curd.",
+      "- Snack: Fruit + roasted chana or seeds.",
+      "- Dinner: Protein + vegetables + whole grains.",
+      "Hydrate through the day and include iron + vitamin C foods.",
+    ].join("\n");
+  }
+
+  const hasExerciseIntent =
+    normalizedQuestion.includes("exercise") ||
+    normalizedQuestion.includes("workout") ||
+    normalizedQuestion.includes("walk") ||
+    normalizedQuestion.includes("yoga");
+
+  if (hasExerciseIntent) {
+    return [
+      "Light exercise is usually helpful in pregnancy if your clinician has not restricted activity:",
+      "- 20 to 30 min gentle walk.",
+      "- Prenatal stretches or breathing.",
+      "- Stop if you feel pain, dizziness, bleeding, contractions, or shortness of breath.",
+      "If you have high-risk pregnancy conditions, confirm your routine with your doctor first.",
+    ].join("\n");
+  }
+
+  const hasSleepIntent =
+    normalizedQuestion.includes("sleep") ||
+    normalizedQuestion.includes("insomnia") ||
+    normalizedQuestion.includes("night");
+
+  if (hasSleepIntent) {
+    return [
+      "To sleep better during pregnancy, try:",
+      "- Left-side sleeping with a pillow between knees.",
+      "- Light dinner 2 to 3 hours before bed.",
+      "- No caffeine late evening and reduce screen time before sleep.",
+      "- Slow breathing for 5 minutes before bed.",
+    ].join("\n");
+  }
+
+  const hasMentalHealthIntent =
+    normalizedQuestion.includes("mental") ||
+    normalizedQuestion.includes("stress") ||
+    normalizedQuestion.includes("anxiety") ||
+    normalizedQuestion.includes("lonely") ||
+    normalizedQuestion.includes("overwhelm");
+
+  if (hasMentalHealthIntent) {
+    return [
+      "You are not alone. Try this 5-minute reset now:",
+      "- Inhale 4 sec, exhale 6 sec for 10 rounds.",
+      "- Drink water and sit in a comfortable position.",
+      "- Message one trusted person and share how you feel.",
+      "If low mood or anxiety lasts several days, please reach out to a clinician.",
+    ].join("\n");
+  }
+
+  const hasWarningSignsIntent =
+    normalizedQuestion.includes("warning") ||
+    normalizedQuestion.includes("danger") ||
+    normalizedQuestion.includes("emergency");
+
+  if (hasWarningSignsIntent) {
+    return [
+      "Urgent warning signs in pregnancy include:",
+      "- Heavy bleeding or leaking fluid.",
+      "- Severe abdominal pain or regular painful contractions.",
+      "- Severe headache, blurred vision, or face/hand swelling.",
+      "- Fever, chest pain, or breathing difficulty.",
+      "If any are present, seek emergency care immediately.",
+    ].join("\n");
+  }
+
+  return null;
+}
+
 export default function ChatScreen() {
   const { selectedLanguage } = useApp();
   const router = useRouter();
@@ -261,6 +351,8 @@ export default function ChatScreen() {
         return;
       }
 
+      const quickSupportFallbackAnswer = buildQuickSupportFallbackAnswer(text);
+
       const exchangeId = `${Date.now()}`;
       setExchanges((prev) => [
         ...prev,
@@ -286,7 +378,10 @@ export default function ChatScreen() {
 
       try {
         const result = await sendChat(messages, selectedLanguage);
-        const finalText = result.text?.trim() || "I hit a temporary issue. Please try again in a moment.";
+        const finalText =
+          result.text?.trim() ||
+          quickSupportFallbackAnswer ||
+          "I hit a temporary issue. Please try again in a moment.";
 
         await animateAnswer(exchangeId, finalText);
 
@@ -309,7 +404,9 @@ export default function ChatScreen() {
             item.id === exchangeId
               ? {
                   ...item,
-                  answer: "I hit a temporary issue. Please try again in a moment.",
+                  answer:
+                    quickSupportFallbackAnswer ||
+                    "I hit a temporary issue. Please try again in a moment.",
                 }
               : item
           )
@@ -372,19 +469,23 @@ export default function ChatScreen() {
 
   const onSpeakLastAnswer = async () => {
     const lastAnswer = exchanges[exchanges.length - 1]?.answer?.trim();
-    if (!lastAnswer || isSpeaking) return;
+    if (!lastAnswer) return;
 
+    const locale = localeForLanguage(selectedLanguage);
+
+    if (isSpeaking) {
+      await stopSpeaking();
+      setIsSpeaking(false);
+      return;
+    }
+
+    setIsSpeaking(true);
     try {
-      setIsSpeaking(true);
-      Speech.speak(lastAnswer, {
-        language: locale,
-        pitch: 1,
-        rate: 0.95,
-        onDone: () => setIsSpeaking(false),
-        onStopped: () => setIsSpeaking(false),
-        onError: () => setIsSpeaking(false),
-      });
-    } catch {
+      await speakText(lastAnswer, locale);
+    } catch (err) {
+      console.debug("TTS speak failed", err);
+      Alert.alert("Audio error", "Could not play speech on this device.");
+    } finally {
       setIsSpeaking(false);
     }
   };
@@ -420,9 +521,7 @@ export default function ChatScreen() {
 
         <View style={styles.headerRight}>
           <LanguageSelector />
-          <TouchableOpacity style={styles.emergencyPillBtn} onPress={() => router.push("/emergency")}>
-            <AlertTriangle size={14} color={colors.white} />
-          </TouchableOpacity>
+          <EmergencySupportButton onPress={() => router.push("/emergency")} />
           <TouchableOpacity style={styles.iconPillBtn} onPress={() => onSpeakLastAnswer().catch(() => undefined)}>
             {isSpeaking ? <VolumeX size={16} color={colors.brand} /> : <Volume2 size={16} color={colors.brand} />}
           </TouchableOpacity>

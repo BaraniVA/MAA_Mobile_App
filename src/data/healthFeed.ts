@@ -18,7 +18,7 @@ export const healthFeedItems: HealthFeedItem[] = [
     stage: "TRIMESTER 2",
     title: "Nutrition Guide for Trimester 2",
     subtitle: "Essential vitamins and minerals you need during your second trimester.",
-    image: "https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&w=400&q=80",
+    image: "https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=400&q=80",
     body: [
       "Your baby is growing rapidly in trimester 2, so food quality matters more than just calories.",
       "Aim for balanced meals with protein, iron, calcium, and healthy fats to support both growth and maternal energy.",
@@ -37,7 +37,7 @@ export const healthFeedItems: HealthFeedItem[] = [
     stage: "ALL STAGES",
     title: "Gentle Prenatal Yoga",
     subtitle: "15-minute routine to help with back pain and flexibility.",
-    image: "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?auto=format&fit=crop&w=400&q=80",
+    image: "https://images.unsplash.com/photo-1506126613408-eca07ce68773?auto=format&fit=crop&w=400&q=80",
     body: [
       "Gentle prenatal movement can reduce stiffness and improve sleep quality.",
       "Keep all stretches comfortable and avoid any pose that causes pain, dizziness, or breathlessness.",
@@ -56,7 +56,7 @@ export const healthFeedItems: HealthFeedItem[] = [
     stage: "ALL STAGES",
     title: "Managing Pregnancy Anxiety",
     subtitle: "Tips for staying calm and mindful during your journey.",
-    image: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=400&q=80",
+    image: "https://images.pexels.com/photos/7089401/pexels-photo-7089401.jpeg?auto=compress&cs=tinysrgb&w=400",
     body: [
       "Pregnancy anxiety is common and manageable with small daily routines.",
       "The goal is not to remove every worry, but to build calm habits that help your nervous system settle.",
@@ -75,7 +75,7 @@ export const healthFeedItems: HealthFeedItem[] = [
     stage: "TRIMESTER 3",
     title: "Hospital Bag Checklist",
     subtitle: "Everything you need to pack for your big day.",
-    image: "https://images.unsplash.com/photo-1542273917363-3b1817f69a2d?auto=format&fit=crop&w=400&q=80",
+    image: "https://images.unsplash.com/photo-1758599668338-4c55a3bd0ce0?q=80&w=1032&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
     body: [
       "Packing early lowers stress and helps you feel prepared as your due date approaches.",
       "Keep your bag visible so it is easy to grab whenever labor starts.",
@@ -94,7 +94,7 @@ export const healthFeedItems: HealthFeedItem[] = [
     stage: "ALL STAGES",
     title: "Postpartum Recovery Tips",
     subtitle: "What to expect in the first few weeks after delivery.",
-    image: "https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=400&q=80",
+    image: "https://images.unsplash.com/photo-1516589178581-6cd7833ae3b2?auto=format&fit=crop&w=400&q=80",
     body: [
       "Recovery is gradual and different for every mother.",
       "Rest, hydration, and support are key foundations in the first weeks.",
@@ -113,7 +113,7 @@ export const healthFeedItems: HealthFeedItem[] = [
     stage: "ALL STAGES",
     title: "Iron-Rich Foods for Pregnancy",
     subtitle: "Boost your energy levels with these iron-packed snacks.",
-    image: "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=400&q=80",
+    image: "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=400&q=80",
     body: [
       "Iron needs increase during pregnancy, and low iron can cause fatigue and dizziness.",
       "Small daily choices can improve your iron intake significantly.",

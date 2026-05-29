@@ -5,6 +5,7 @@ import { useApp } from "@/context/AppContext";
 import { InlineToast } from "@/components/InlineToast";
 import { PregnancyIllustration } from "@/components/PregnancyIllustration";
 import { colors, borders, shadows, radius, spacing } from "@/constants/theme";
+import { isValidProfileName, parseDueDateInput } from "@/services/date";
 
 const welcomeNotes = ["Daily check-ins", "Prenatal support", "Calm reminders"];
 
@@ -16,15 +17,28 @@ export default function OnboardingScreen() {
   const [error, setError] = useState("");
 
   const begin = async () => {
-    if (!name.trim() || !dueDate.trim()) {
+    const trimmedName = name.trim();
+    const trimmedDueDate = dueDate.trim();
+
+    if (!trimmedName || !trimmedDueDate) {
       setError("Please enter your name and due date (YYYY-MM-DD).");
+      return;
+    }
+
+    if (!isValidProfileName(trimmedName)) {
+      setError("Please enter a valid name using letters, spaces, hyphens, periods, or apostrophes only.");
+      return;
+    }
+
+    if (!parseDueDateInput(trimmedDueDate)) {
+      setError("Please enter a valid due date in YYYY-MM-DD format.");
       return;
     }
 
     setLoading(true);
     setError("");
     try {
-      await upsertProfile({ name: name.trim(), dueDate: dueDate.trim() });
+      await upsertProfile({ name: trimmedName, dueDate: trimmedDueDate });
       router.replace("/(tabs)");
     } catch {
       setError("Could not save profile. Please try again.");
