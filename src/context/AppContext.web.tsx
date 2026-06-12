@@ -1,0 +1,187 @@
+import { PropsWithChildren, createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  deleteReminder,
+  getFeedActivity,
+  getProfile,
+  getReminders,
+  saveProfile,
+  saveReminder,
+  setFeedLike,
+  setFeedSave,
+} from "@/db/helpers";
+import { FeedActivity, Profile, Reminder } from "@/types";
+
+export const supportedLanguages = ["English", "தமிழ்", "हिन्दी", "తెలుగు", "मराठी", "മലയാളം"] as const;
+
+type TranslationKey = "sos_alert_title" | "sos_alert_body" | "cancel" | "confirm";
+
+const translations: Record<(typeof supportedLanguages)[number], Record<TranslationKey, string>> = {
+  English: {
+    sos_alert_title: "SOS Emergency Support",
+    sos_alert_body: "Access emergency helpline numbers, call your doctor, or find nearby hospitals instantly.",
+    cancel: "Cancel",
+    confirm: "Confirm",
+  },
+  தமிழ்: {
+    sos_alert_title: "அவசர உதவி",
+    sos_alert_body: "அவசர உதவி எண்களைப் பார்க்கவும், உங்கள் மருத்துவரை அழைக்கவும், அல்லது அருகிலுள்ள மருத்துவமனைகளைத் தேடவும்.",
+    cancel: "ரத்து செய்",
+    confirm: "உறுதிப்படுத்து",
+  },
+  हिन्दी: {
+    sos_alert_title: "आपातकालीन सहायता",
+    sos_alert_body: "आपातकालीन हेल्पलाइन नंबर देखें, अपने डॉक्टर को कॉल करें, या पास के अस्पताल खोजें।",
+    cancel: "रद्द करें",
+    confirm: "पुष्टि करें",
+  },
+  తెలుగు: {
+    sos_alert_title: "అత్యవసర సహాయం",
+    sos_alert_body: "అత్యవసర హెల్ప్‌లైన్ నంబర్లు చూడండి, మీ డాక్టర్‌కు కాల్ చేయండి, లేదా దగ్గర్లోని ఆసుపత్రులను కనుగొనండి.",
+    cancel: "రద్దు చేయి",
+    confirm: "నిర్ధారించు",
+  },
+  मराठी: {
+    sos_alert_title: "आपत्कालीन मदत",
+    sos_alert_body: "आपत्कालीन हेल्पलाइन क्रमांक पहा, तुमच्या डॉक्टरांना कॉल करा, किंवा जवळची रुग्णालये शोधा.",
+    cancel: "रद्द करा",
+    confirm: "पुष्टी करा",
+  },
+  മലയാളം: {
+    sos_alert_title: "അടിയന്തര സഹായം",
+    sos_alert_body: "അടിയന്തര ഹെൽപ്‌ലൈൻ നമ്പറുകൾ കാണുക, നിങ്ങളുടെ ഡോക്ടറെ വിളിക്കുക, അല്ലെങ്കിൽ സമീപത്തുള്ള ആശുപത്രികൾ കണ്ടെത്തുക.",
+    cancel: "റദ്ദാക്കുക",
+    confirm: "സ്ഥിരീകരിക്കുക",
+  },
+};
+
+type WebDatabase = Record<string, never>;
+
+type AppState = {
+  db: WebDatabase;
+  profile: Profile | null;
+  reminders: Reminder[];
+  feedActivity: FeedActivity[];
+  loadingProfile: boolean;
+  refreshProfile: () => Promise<void>;
+  upsertProfile: (payload: {
+    name: string;
+    dueDate: string;
+    bloodType?: string;
+    doctorName?: string;
+    doctorPhone?: string;
+    preferredVoice?: string;
+  }) => Promise<void>;
+  refreshReminders: () => Promise<void>;
+  refreshFeedActivity: () => Promise<void>;
+  upsertReminder: (payload: { id?: number; title: string; remindAt: string; repeat: "none" | "daily" | "weekly" }) => Promise<void>;
+  removeReminder: (id: number) => Promise<void>;
+  toggleFeedLike: (slug: string) => Promise<void>;
+  toggleFeedSave: (slug: string) => Promise<void>;
+  selectedLanguage: (typeof supportedLanguages)[number];
+  setSelectedLanguage: (language: (typeof supportedLanguages)[number]) => void;
+  t: (key: TranslationKey) => string;
+};
+
+const AppContext = createContext<AppState | null>(null);
+const webDb = {} as WebDatabase;
+
+export function AppProvider({ children }: PropsWithChildren) {
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [feedActivity, setFeedActivity] = useState<FeedActivity[]>([]);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [selectedLanguage, setSelectedLanguage] = useState<(typeof supportedLanguages)[number]>("English");
+
+  const refreshProfile = useCallback(async () => {
+    const next = await getProfile(webDb);
+    setProfile(next);
+  }, []);
+
+  const refreshReminders = useCallback(async () => {
+    const next = await getReminders(webDb);
+    setReminders(next);
+  }, []);
+
+  const refreshFeedActivity = useCallback(async () => {
+    const next = await getFeedActivity(webDb);
+    setFeedActivity(next);
+  }, []);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoadingProfile(true);
+      await Promise.all([refreshProfile(), refreshReminders(), refreshFeedActivity()]);
+      setLoadingProfile(false);
+    };
+
+    load().catch(() => setLoadingProfile(false));
+  }, [refreshProfile, refreshReminders, refreshFeedActivity]);
+
+  const upsertProfile = async (payload: {
+    name: string;
+    dueDate: string;
+    bloodType?: string;
+    doctorName?: string;
+    doctorPhone?: string;
+    preferredVoice?: string;
+  }) => {
+    await saveProfile(webDb, payload);
+    await refreshProfile();
+  };
+
+  const upsertReminder = async (payload: { id?: number; title: string; remindAt: string; repeat: "none" | "daily" | "weekly" }) => {
+    await saveReminder(webDb, payload);
+    await refreshReminders();
+  };
+
+  const removeReminder = async (id: number) => {
+    await deleteReminder(webDb, id);
+    await refreshReminders();
+  };
+
+  const toggleFeedLike = async (slug: string) => {
+    const current = feedActivity.find((item) => item.slug === slug)?.liked === 1;
+    await setFeedLike(webDb, slug, !current);
+    await refreshFeedActivity();
+  };
+
+  const toggleFeedSave = async (slug: string) => {
+    const current = feedActivity.find((item) => item.slug === slug)?.saved === 1;
+    await setFeedSave(webDb, slug, !current);
+    await refreshFeedActivity();
+  };
+
+  const t = (key: TranslationKey) => translations[selectedLanguage][key] ?? translations.English[key];
+
+  const value = useMemo<AppState>(
+    () => ({
+      db: webDb,
+      profile,
+      reminders,
+      feedActivity,
+      loadingProfile,
+      refreshProfile,
+      upsertProfile,
+      refreshReminders,
+      refreshFeedActivity,
+      upsertReminder,
+      removeReminder,
+      toggleFeedLike,
+      toggleFeedSave,
+      selectedLanguage,
+      setSelectedLanguage,
+      t,
+    }),
+    [profile, reminders, feedActivity, loadingProfile, refreshProfile, refreshReminders, refreshFeedActivity, selectedLanguage]
+  );
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+}
+
+export function useApp(): AppState {
+  const context = useContext(AppContext);
+  if (!context) {
+    throw new Error("useApp must be used inside AppProvider");
+  }
+  return context;
+}
